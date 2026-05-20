@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Прозрачность жидкости</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f7fa;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 15px;
+        }
+        .container {
+            width: 100%;
+            max-width: 550px;
+            background: white;
+            border-radius: 20px;
+            padding: 20px 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+            text-align: center;
+            position: relative;
+        }
+        #datetime {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            font-size: 0.85rem;
+            color: #666;
+            background: rgba(0,0,0,0.05);
+            padding: 4px 10px;
+            border-radius: 8px;
+            z-index: 10;
+        }
+        h1 { font-size: 1.5rem; margin-bottom: 0.3rem; color: #2c3e50; }
+        .video-wrapper {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 4/3;
+            background: #000;
+            border-radius: 12px;
+            overflow: hidden;
+            margin: 15px 0;
+        }
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        .region-selector {
+            position: absolute;
+            border: 2px dashed #f1c40f;
+            background: rgba(241, 196, 15, 0.15);
+            pointer-events: none;
+            display: none;
+            z-index: 5;
+        }
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            justify-content: center;
+            margin: 10px 0;
+        }
+        button {
+            flex: 1 1 auto;
+            min-width: 80px;
+            padding: 10px 8px;
+            border: none;
+            border-radius: 12px;
+            background: #3498db;
+            color: white;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s, transform 0.1s;
+            touch-action: manipulation;
+        }
+        button:active { transform: scale(0.96); }
+        button:disabled { background: #bdc3c7; transform: none; }
+        .calibrate-btn { background: #27ae60; }
+        .record-btn { background: #f39c12; }
+        .threshold-row {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            margin: 10px 0;
+            flex-wrap: wrap;
+        }
+        .threshold-row input {
+            width: 70px;
+            padding: 8px;
+            border-radius: 8px;
+            border: 1px solid #ccc;
+            font-size: 1rem;
+            text-align: center;
+        }
+        .warning-text {
+            color: #e74c3c;
+            font-weight: bold;
+            font-size: 1.2rem;
+            margin: 5px 0;
+            min-height: 1.5em;
+        }
+        .result-card {
+            background: #f8fafc;
+            border-radius: 16px;
+            padding: 15px;
+            margin-top: 10px;
+        }
+        .meter {
+            width: 100%;
+            height: 24px;
+            background: linear-gradient(to right, #fff, #2c3e50);
+            border-radius: 12px;
+            margin: 12px 0;
+            position: relative;
+            overflow: hidden;
+            border: 1px solid #ddd;
+        }
+        .indicator {
+            position: absolute;
+            top: -3px;
+            width: 5px;
+            height: 30px;
+            background: #e74c3c;
+            border-radius: 3px;
+            transition: left 0.15s;
+        }
+        .stats {
+            display: flex;
+            justify-content: space-around;
+            font-size: 1rem;
+            margin: 5px 0;
+        }
+        .value { font-weight: 700; font-size: 1.3rem; color: #2c3e50; }
+        #statusText { font-size: 0.9rem; color: #7f8c8d; margin-top: 5px; min-height: 1.2em; }
+        .history {
+            margin-top: 15px;
+            text-align: left;
+            max-height: 150px;
+            overflow-y: auto;
+            border-top: 1px solid #eee;
+            padding-top: 10px;
+        }
+        .history h3 { margin-bottom: 5px; color: #2c3e50; }
+        .history-item {
+            font-size: 0.8rem;
+            padding: 4px 6px;
+            background: #fff;
+            border-radius: 6px;
+            margin-bottom: 3px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .history-item span { font-weight: 600; }
+        .clear-history {
+            font-size: 0.75rem;
+            color: #e74c3c;
+            cursor: pointer;
+            text-decoration: underline;
+            background: none;
+            border: none;
+            padding: 0;
+            margin-top: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div id="datetime"></div>
+        <h1>💧 Прозрачность жидкости</h1>
+
+        <div class="video-wrapper" id="videoWrapper">
+            <video id="video" autoplay playsinline muted></video>
+            <div id="regionSelector" class="region-selector"></div>
+        </div>
+
+        <div class="controls">
+            <button id="areaBtn" disabled>🎯 Область</button>
+            <button id="resetBtn" disabled>🔄 Сброс</button>
+            <button id="calibrateBtn" class="calibrate-btn" disabled>📏 Калибровать</button>
+            <button id="recordBtn" class="record-btn" disabled>📝 Записать</button>
+        </div>
+
+        <div class="threshold-row">
+            <label for="threshold">Порог (0-100%):</label>
+            <input type="number" id="threshold" value="70" min="0" max="100" step="1">
+        </div>
+        <div id="warningMessage" class="warning-text"></div>
+
+        <div class="result-card">
+            <div class="stats">
+                <span>Прозрачность <span class="value" id="transparencyValue">0%</span></span>
+                <span>Яркость <span class="value" id="brightnessValue">0</span></span>
+            </div>
+            <div class="meter">
+                <div class="indicator" id="indicator" style="left: 0%;"></div>
+            </div>
+            <div id="statusText">Загрузка камеры...</div>
+        </div>
+
+        <div class="history" id="historyContainer">
+            <h3>📋 История измерений</h3>
+            <div id="historyList"></div>
+            <button class="clear-history" id="clearHistoryBtn">Очистить историю</button>
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const areaBtn = document.getElementById('areaBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const calibrateBtn = document.getElementById('calibrateBtn');
+        const recordBtn = document.getElementById('recordBtn');
+        const transparencyEl = document.getElementById('transparencyValue');
+        const brightnessEl = document.getElementById('brightnessValue');
+        const indicatorEl = document.getElementById('indicator');
+        const statusEl = document.getElementById('statusText');
+        const regionSelector = document.getElementById('regionSelector');
+        const thresholdInput = document.getElementById('threshold');
+        const warningMsg = document.getElementById('warningMessage');
+        const datetimeEl = document.getElementById('datetime');
+        const historyList = document.getElementById('historyList');
+        const clearHistoryBtn = document.getElementById('clearHistoryBtn');
+
+        let stream = null;
+        let analysisRegion = null;
+        let isSelecting = false;
+        let animationId = null;
+        let calibrationBrightness = null; // яркость при калибровке (100%)
+        let currentTransparency = 0;
+        let currentBrightness = 0;
+
+        // Дата и время
+        function updateDateTime() {
+            const now = new Date();
+            const options = { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' };
+            datetimeEl.textContent = now.toLocaleString('ru-RU', options);
+        }
+        setInterval(updateDateTime, 1000);
+        updateDateTime();
+
+        // Запуск камеры
+        async function startCamera() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: { ideal: 'environment' }, width: { ideal: 640 }, height: { ideal: 480 } },
+                    audio: false
+                });
+            } catch (e) {
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                } catch (err) {
+                    statusEl.textContent = '❌ Нет доступа к камере. Разрешите и перезагрузите.';
+                    return;
+                }
+            }
+            video.srcObject = stream;
+            video.onloadedmetadata = () => {
+                video.play();
+                statusEl.textContent = '✅ Камера работает. Выберите область и/или выполните калибровку.';
+                areaBtn.disabled = false;
+                calibrateBtn.disabled = false;
+                recordBtn.disabled = false;
+                resetBtn.disabled = true;
+                startAnalysis();
+            };
+        }
+
+        // Выбор области (с мыши и касания)
+        function getCoords(e) {
+            const rect = video.getBoundingClientRect();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            return {
+                x: clientX - rect.left,
+                y: clientY - rect.top,
+                rectWidth: rect.width,
+                rectHeight: rect.height
+            };
+        }
+        let startX, startY;
+        function onPointerDown(e) {
+            if (!isSelecting) return;
+            e.preventDefault();
+            const { x, y } = getCoords(e);
+            startX = x; startY = y;
+            regionSelector.style.display = 'block';
+            regionSelector.style.left = x + 'px';
+            regionSelector.style.top = y + 'px';
+            regionSelector.style.width = '0px';
+            regionSelector.style.height = '0px';
+        }
+        function onPointerMove(e) {
+            if (!isSelecting || startX === undefined) return;
+            e.preventDefault();
+            const { x, y } = getCoords(e);
+            const left = Math.min(startX, x);
+            const top = Math.min(startY, y);
+            regionSelector.style.left = left + 'px';
+            regionSelector.style.top = top + 'px';
+            regionSelector.style.width = Math.abs(x - startX) + 'px';
+            regionSelector.style.height = Math.abs(y - startY) + 'px';
+        }
+        function onPointerUp(e) {
+            if (!isSelecting || startX === undefined) return;
+            e.preventDefault();
+            const { x, y, rectWidth, rectHeight } = getCoords(e);
+            const scaleX = video.videoWidth / rectWidth;
+            const scaleY = video.videoHeight / rectHeight;
+            analysisRegion = {
+                x: Math.min(startX, x) * scaleX,
+                y: Math.min(startY, y) * scaleY,
+                width: Math.abs(x - startX) * scaleX,
+                height: Math.abs(y - startY) * scaleY
+            };
+            isSelecting = false;
+            areaBtn.textContent = '🎯 Область';
+            areaBtn.style.background = '#3498db';
+            resetBtn.disabled = false;
+            statusEl.textContent = '✅ Область выбрана. Идёт анализ...';
+            removeSelectionListeners();
+        }
+        function addSelectionListeners() {
+            video.addEventListener('mousedown', onPointerDown);
+            video.addEventListener('mousemove', onPointerMove);
+            video.addEventListener('mouseup', onPointerUp);
+            video.addEventListener('touchstart', onPointerDown, { passive: false });
+            video.addEventListener('touchmove', onPointerMove, { passive: false });
+            video.addEventListener('touchend', onPointerUp);
+        }
+        function removeSelectionListeners() {
+            video.removeEventListener('mousedown', onPointerDown);
+            video.removeEventListener('mousemove', onPointerMove);
+            video.removeEventListener('mouseup', onPointerUp);
+            video.removeEventListener('touchstart', onPointerDown);
+            video.removeEventListener('touchmove', onPointerMove);
+            video.removeEventListener('touchend', onPointerUp);
+        }
+
+        areaBtn.addEventListener('click', () => {
+            if (isSelecting) {
+                isSelecting = false;
+                areaBtn.textContent = '🎯 Область';
+                areaBtn.style.background = '#3498db';
+                regionSelector.style.display = 'none';
+                statusEl.textContent = 'Выбор области отменён.';
+                removeSelectionListeners();
+                return;
+            }
+            if (!stream) return;
+            isSelecting = true;
+            areaBtn.textContent = '✋ Отменить';
+            areaBtn.style.background = '#e67e22';
+            statusEl.textContent = 'Выделите область пальцем или мышью';
+            startX = undefined; startY = undefined;
+            addSelectionListeners();
+        });
+
+        resetBtn.addEventListener('click', () => {
+            analysisRegion = null;
+            regionSelector.style.display = 'none';
+            resetBtn.disabled = true;
+            statusEl.textContent = '🔄 Область сброшена. Анализ по всему кадру.';
+        });
+
+        // Калибровка
+        calibrateBtn.addEventListener('click', () => {
+            if (!stream) return;
+            // Сохраняем текущую среднюю яркость как 100%
+            calibrationBrightness = currentBrightness;
+            statusEl.textContent = `📏 Калибровка выполнена! Яркость ${calibrationBrightness.toFixed(1)} = 100%`;
+            // Пересчитаем прозрачность, если анализ уже идёт
+        });
+
+        // Запись результата в историю
+        function addHistoryRecord() {
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('ru-RU');
+            const dateStr = now.toLocaleDateString('ru-RU');
+            const threshold = parseFloat(thresholdInput.value) || 70;
+            const warning = currentTransparency < threshold ? '⚠️ WARNING' : '✅ Норма';
+            const div = document.createElement('div');
+            div.className = 'history-item';
+            div.innerHTML = `<span>${dateStr} ${timeStr}</span> <span>Прозр: ${currentTransparency.toFixed(1)}%</span> <span>${warning}</span>`;
+            historyList.prepend(div);
+        }
+
+        recordBtn.addEventListener('click', () => {
+            if (!stream) return;
+            addHistoryRecord();
+        });
+
+        clearHistoryBtn.addEventListener('click', () => {
+            historyList.innerHTML = '';
+        });
+
+        // Основной анализ кадра
+        function analyzeFrame() {
+            if (!stream || video.readyState < 2) {
+                animationId = requestAnimationFrame(analyzeFrame);
+                return;
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0);
+
+            let imageData;
+            if (analysisRegion) {
+                const rx = Math.max(0, Math.min(analysisRegion.x, canvas.width - 1));
+                const ry = Math.max(0, Math.min(analysisRegion.y, canvas.height - 1));
+                const rw = Math.max(1, Math.min(analysisRegion.width, canvas.width - rx));
+                const rh = Math.max(1, Math.min(analysisRegion.height, canvas.height - ry));
+                imageData = ctx.getImageData(rx, ry, rw, rh);
+            } else {
+                imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            }
+
+            const data = imageData.data;
+            let totalBrightness = 0;
+            const pixelCount = data.length / 4;
+            for (let i = 0; i < data.length; i += 4) {
+                totalBrightness += 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
+            }
+            currentBrightness = totalBrightness / pixelCount;
+
+            // Расчёт прозрачности с учётом калибровки
+            if (calibrationBrightness && calibrationBrightness > 0) {
+                currentTransparency = Math.min(100, (currentBrightness / calibrationBrightness) * 100);
+            } else {
+                currentTransparency = Math.min(100, (currentBrightness / 255) * 100);
+            }
+            currentTransparency = Math.max(0, currentTransparency);
+
+            // Обновление интерфейса
+            transparencyEl.textContent = currentTransparency.toFixed(1) + '%';
+            brightnessEl.textContent = currentBrightness.toFixed(1);
+            indicatorEl.style.left = currentTransparency + '%';
+
+            // Проверка порога и вывод предупреждения
+            const threshold = parseFloat(thresholdInput.value) || 70;
+            if (currentTransparency < threshold) {
+                warningMsg.textContent = '⚠️ WARNING: Прозрачность ниже порога!';
+            } else {
+                warningMsg.textContent = '';
+            }
+
+            let quality = '';
+            if (currentTransparency > 90) quality = '💧 Очень прозрачная';
+            else if (currentTransparency > 70) quality = '💧 Прозрачная';
+            else if (currentTransparency > 50) quality = '🌫️ Средняя мутность';
+            else if (currentTransparency > 30) quality = '🌫️ Мутная';
+            else quality = '⬛ Очень мутная';
+            statusEl.textContent = quality;
+
+            animationId = requestAnimationFrame(analyzeFrame);
+        }
+
+        function startAnalysis() {
+            if (animationId) cancelAnimationFrame(animationId);
+            analyzeFrame();
+        }
+
+        window.addEventListener('load', () => {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                statusEl.textContent = '❌ Браузер не поддерживает камеру.';
+                return;
+            }
+            startCamera();
+        });
+
+        window.addEventListener('beforeunload', () => {
+            if (stream) stream.getTracks().forEach(track => track.stop());
+        });
+    </script>
+</body>
+</html>
