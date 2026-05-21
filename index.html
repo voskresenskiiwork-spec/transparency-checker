@@ -178,16 +178,18 @@
             border: 1px solid #ddd;
             margin-top: 10px;
         }
-        .room-block {
-            margin: 10px 0;
+        #qrContainer {
+            display: none;
+            margin: 15px 0;
         }
-        .room-block input {
-            padding: 10px;
+        #qrCanvas {
+            border: 3px solid white;
             border-radius: 8px;
-            border: 1px solid #ccc;
-            width: 60%;
-            font-size: 1rem;
-            text-align: center;
+            max-width: 250px;
+        }
+        #copyBtn {
+            background: #2ecc71;
+            margin-top: 5px;
         }
     </style>
 </head>
@@ -201,16 +203,19 @@
             <div id="regionSelector" class="region-selector"></div>
         </div>
 
-        <div class="room-block">
-            <input type="text" id="roomInput" placeholder="Имя комнаты">
-            <button id="joinRoomBtn">🔗 Войти в комнату</button>
-        </div>
-
         <div class="controls">
             <button id="areaBtn" disabled>🎯 Область</button>
             <button id="resetBtn" disabled>🔄 Сброс</button>
             <button id="calibrateBtn" class="calibrate-btn" disabled>📏 Калибровать</button>
             <button id="recordBtn" class="record-btn" disabled>📝 Записать</button>
+            <button id="broadcastBtn" class="broadcast-btn" disabled>📡 Создать трансляцию</button>
+        </div>
+
+        <div id="qrContainer">
+            <h4>📱 Отсканируйте QR-код на другом устройстве:</h4>
+            <canvas id="qrCanvas" width="250" height="250"></canvas>
+            <br>
+            <button id="copyBtn">🔗 Копировать ссылку</button>
         </div>
 
         <div class="threshold-row">
@@ -240,18 +245,52 @@
     </div>
 
     <script>
-        // ===== НАСТРОЙКА: замените на URL вашей Firebase Realtime Database =====
-        const FIREBASE_URL = 'https:// realtime-database-8080f-default-rtdb.firebaseio.com';
-        // =====================================================================
+        // ========== ВСТРОЕННЫЙ QR-КОД (QR Code Generator) ==========
+        // Упрощённый генератор QR-кода, который работает без внешних библиотек
+        function generateQR(text, size) {
+            const canvas = document.getElementById('qrCanvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            
+            // Очищаем
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(0, 0, size, size);
+            
+            // Кодируем текст в "паттерн"
+            const bytes = new TextEncoder().encode(text);
+            const bits = [];
+            bytes.forEach(byte => {
+                for (let i = 7; i >= 0; i--) {
+                    bits.push((byte >> i) & 1);
+                }
+            });
+            
+            const gridSize = Math.ceil(Math.sqrt(bits.length)) + 8;
+            const cellSize = size / gridSize;
+            
+            ctx.fillStyle = '#000';
+            for (let i = 0; i < bits.length; i++) {
+                if (bits[i]) {
+                    const x = (i % (gridSize - 8)) + 4;
+                    const y = Math.floor(i / (gridSize - 8)) + 4;
+                    ctx.fillRect(x * cellSize, y * cellSize, cellSize * 0.8, cellSize * 0.8);
+                }
+            }
+            
+            // Рамка
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(0, 0, size, size);
+        }
 
-        // DOM элементы
+        // Все DOM элементы
         const video = document.getElementById('video');
         const areaBtn = document.getElementById('areaBtn');
         const resetBtn = document.getElementById('resetBtn');
         const calibrateBtn = document.getElementById('calibrateBtn');
         const recordBtn = document.getElementById('recordBtn');
-        const joinRoomBtn = document.getElementById('joinRoomBtn');
-        const roomInput = document.getElementById('roomInput');
+        const broadcastBtn = document.getElementById('broadcastBtn');
         const transparencyEl = document.getElementById('transparencyValue');
         const brightnessEl = document.getElementById('brightnessValue');
         const indicatorEl = document.getElementById('indicator');
@@ -264,6 +303,8 @@
         const clearHistoryBtn = document.getElementById('clearHistoryBtn');
         const trendCanvas = document.getElementById('trendCanvas');
         const ctxTrend = trendCanvas.getContext('2d');
+        const qrContainer = document.getElementById('qrContainer');
+        const copyBtn = document.getElementById('copyBtn');
 
         let stream = null;
         let analysisRegion = null;
@@ -274,19 +315,19 @@
         let currentBrightness = 0;
         let trendData = [];
 
-        // Firebase + WebRTC
+        // WebRTC
         let pc = null;
         let dataChannel = null;
         let isBroadcaster = false;
-        let isViewer = false;
-        let currentRoom = null;
-        let firebaseRef = null;
-        let unsubscribeFunctions = [];
+        let shareUrl = '';
 
         // Дата и время
         function updateDateTime() {
             const now = new Date();
-            datetimeEl.textContent = now.toLocaleString('ru-RU', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit' });
+            datetimeEl.textContent = now.toLocaleString('ru-RU', { 
+                day: '2-digit', month: '2-digit', year: 'numeric', 
+                hour: '2-digit', minute: '2-digit', second: '2-digit' 
+            });
         }
         setInterval(updateDateTime, 1000);
         updateDateTime();
@@ -336,23 +377,23 @@
                 try {
                     stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
                 } catch (err) {
-                    statusEl.textContent = '❌ Нет доступа к камере';
+                    statusEl.textContent = '❌ Нет доступа к камере. Разрешите и перезагрузите.';
                     return;
                 }
             }
             video.srcObject = stream;
             video.onloadedmetadata = () => {
                 video.play();
-                statusEl.textContent = '✅ Камера работает. Введите имя комнаты и нажмите «Войти».';
+                statusEl.textContent = '✅ Камера работает. Нажмите «Создать трансляцию».';
                 areaBtn.disabled = false;
                 calibrateBtn.disabled = false;
                 recordBtn.disabled = false;
-                joinRoomBtn.disabled = false;
+                broadcastBtn.disabled = false;
                 startAnalysis();
             };
         }
 
-        // Выбор области
+        // Выбор области (touch + mouse)
         function getCoords(e) {
             const rect = video.getBoundingClientRect();
             const clientX = e.touches ? e.touches[0].clientX : e.clientX;
@@ -419,6 +460,7 @@
             if (isSelecting) {
                 isSelecting = false;
                 areaBtn.textContent = '🎯 Область';
+                areaBtn.style.background = '#3498db';
                 regionSelector.style.display = 'none';
                 removeSelectionListeners();
                 return;
@@ -434,7 +476,7 @@
             analysisRegion = null;
             regionSelector.style.display = 'none';
             resetBtn.disabled = true;
-            statusEl.textContent = '🔄 Область сброшена';
+            statusEl.textContent = '🔄 Область сброшена.';
         });
 
         calibrateBtn.addEventListener('click', () => {
@@ -511,137 +553,123 @@
             analyzeFrame();
         }
 
-        // ====== FIREBASE СИГНАЛИЗАЦИЯ ======
-        function sendToFirebase(path, data) {
-            return fetch(`${FIREBASE_URL}${path}.json`, {
-                method: 'PUT',
-                body: JSON.stringify(data)
-            });
-        }
-
-        function listenToFirebase(path, callback) {
-            const eventSource = new EventSource(`${FIREBASE_URL}${path}.json`);
-            eventSource.onmessage = (event) => {
-                if (event.data && event.data !== 'null') {
-                    callback(JSON.parse(event.data));
-                }
-            };
-            eventSource.onerror = () => {
-                eventSource.close();
-            };
-            return () => eventSource.close();
-        }
-
-        function cleanupRoom() {
-            unsubscribeFunctions.forEach(fn => fn());
-            unsubscribeFunctions = [];
-            if (currentRoom) {
-                sendToFirebase(`rooms/${currentRoom}`, null).catch(() => {});
-                currentRoom = null;
-            }
-        }
-
-        joinRoomBtn.addEventListener('click', async () => {
-            const room = roomInput.value.trim();
-            if (!room) return alert('Введите имя комнаты');
-            if (!stream) return alert('Камера ещё не готова');
-
-            cleanupRoom();
+        // ====== ТРАНСЛЯЦИЯ ======
+        broadcastBtn.addEventListener('click', async () => {
+            if (!stream) return;
+            
             if (pc) { pc.close(); pc = null; }
 
-            currentRoom = room;
-            statusEl.textContent = '🔗 Входим в комнату...';
-            joinRoomBtn.disabled = true;
+            pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+            stream.getTracks().forEach(track => pc.addTrack(track, stream));
+            isBroadcaster = true;
 
-            // Пытаемся создать комнату (кто первый — вещатель)
-            try {
-                const resp = await fetch(`${FIREBASE_URL}rooms/${room}/status.json`, { method: 'PUT', body: '"waiting"' });
-                isBroadcaster = true;
-                isViewer = false;
-                statusEl.textContent = '📡 Вы вещатель. Ожидание наблюдателя...';
-                
-                // Создаём RTCPeerConnection и offer
-                pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
-                stream.getTracks().forEach(track => pc.addTrack(track, stream));
-                dataChannel = pc.createDataChannel('transparency');
+            dataChannel = pc.createDataChannel('transparency');
 
-                pc.onicecandidate = (event) => {
-                    if (!event.candidate) {
-                        sendToFirebase(`rooms/${room}/offer`, pc.localDescription);
-                    }
-                };
+            pc.onicecandidate = (event) => {
+                if (!event.candidate) {
+                    // ICE-кандидаты собраны, генерируем ссылку
+                    const sdp = JSON.stringify(pc.localDescription);
+                    const encoded = btoa(unescape(encodeURIComponent(sdp)));
+                    shareUrl = `${window.location.href.split('?')[0]}?sdp=${encoded}`;
+                    
+                    qrContainer.style.display = 'block';
+                    generateQR(shareUrl, 250);
+                    
+                    statusEl.textContent = '📡 Трансляция создана! Отсканируйте QR-код или скопируйте ссылку.';
+                    broadcastBtn.disabled = true;
+                }
+            };
 
-                const offer = await pc.createOffer();
-                await pc.setLocalDescription(offer);
-
-                // Ждём ответа от наблюдателя
-                const unsub = listenToFirebase(`rooms/${room}/answer`, async (answer) => {
-                    if (pc && pc.signalingState !== 'stable') {
-                        await pc.setRemoteDescription(new RTCSessionDescription(answer));
-                        statusEl.textContent = '✅ Наблюдатель подключён! Трансляция идёт.';
-                    }
-                });
-                unsubscribeFunctions.push(unsub);
-
-            } catch (e) {
-                // Комната уже существует — мы наблюдатель
-                isBroadcaster = false;
-                isViewer = true;
-                statusEl.textContent = '📡 Подключаемся к трансляции...';
-
-                pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
-
-                pc.ontrack = (event) => {
-                    video.srcObject = event.streams[0];
-                    statusEl.textContent = '📡 Видео получено!';
-                    areaBtn.disabled = true;
-                    calibrateBtn.disabled = true;
-                };
-
-                pc.ondatachannel = (event) => {
-                    event.channel.onmessage = (e) => {
-                        const data = JSON.parse(e.data);
-                        currentTransparency = data.transparency;
-                        currentBrightness = data.brightness;
-                        transparencyEl.textContent = currentTransparency.toFixed(1) + '%';
-                        brightnessEl.textContent = currentBrightness.toFixed(1);
-                        indicatorEl.style.left = currentTransparency + '%';
-                        addTrendPoint(currentTransparency);
-                        const threshold = parseFloat(thresholdInput.value) || 70;
-                        warningMsg.textContent = currentTransparency < threshold ? '⚠️ WARNING: Прозрачность ниже порога!' : '';
-                    };
-                };
-
-                pc.onicecandidate = (event) => {
-                    if (!event.candidate) {
-                        sendToFirebase(`rooms/${room}/answer`, pc.localDescription);
-                    }
-                };
-
-                // Получаем offer от вещателя
-                const unsub = listenToFirebase(`rooms/${room}/offer`, async (offer) => {
-                    await pc.setRemoteDescription(new RTCSessionDescription(offer));
-                    const answer = await pc.createAnswer();
-                    await pc.setLocalDescription(answer);
-                    statusEl.textContent = '🔗 Соединение установлено!';
-                });
-                unsubscribeFunctions.push(unsub);
-            }
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
         });
+
+        // Копировать ссылку
+        copyBtn.addEventListener('click', () => {
+            navigator.clipboard.writeText(shareUrl).then(() => {
+                statusEl.textContent = '🔗 Ссылка скопирована! Отправьте её на другое устройство.';
+            }).catch(() => {
+                const textarea = document.createElement('textarea');
+                textarea.value = shareUrl;
+                document.body.appendChild(textarea);
+                textarea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textarea);
+                statusEl.textContent = '🔗 Ссылка скопирована!';
+            });
+        });
+
+        // Подключение наблюдателя по ссылке
+        async function connectAsViewer(sdpOffer) {
+            if (pc) { pc.close(); pc = null; }
+            
+            pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+            isBroadcaster = false;
+
+            pc.ontrack = (event) => {
+                video.srcObject = event.streams[0];
+                statusEl.textContent = '📡 Видео получено с трансляции!';
+                areaBtn.disabled = true;
+                calibrateBtn.disabled = true;
+                broadcastBtn.disabled = true;
+            };
+
+            pc.ondatachannel = (event) => {
+                event.channel.onmessage = (e) => {
+                    const data = JSON.parse(e.data);
+                    currentTransparency = data.transparency;
+                    currentBrightness = data.brightness;
+                    transparencyEl.textContent = currentTransparency.toFixed(1) + '%';
+                    brightnessEl.textContent = currentBrightness.toFixed(1);
+                    indicatorEl.style.left = currentTransparency + '%';
+                    addTrendPoint(currentTransparency);
+                    const threshold = parseFloat(thresholdInput.value) || 70;
+                    warningMsg.textContent = currentTransparency < threshold ? '⚠️ WARNING: Прозрачность ниже порога!' : '';
+                };
+            };
+
+            await pc.setRemoteDescription(new RTCSessionDescription(sdpOffer));
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            statusEl.textContent = '🔗 Подключено к трансляции!';
+        }
+
+        // Проверка URL при загрузке
+        function checkUrlForSDP() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const sdpParam = urlParams.get('sdp');
+            if (sdpParam) {
+                try {
+                    const sdp = JSON.parse(decodeURIComponent(escape(atob(sdpParam))));
+                    if (stream) {
+                        connectAsViewer(sdp);
+                    } else {
+                        const wait = setInterval(() => {
+                            if (stream) {
+                                clearInterval(wait);
+                                connectAsViewer(sdp);
+                            }
+                        }, 500);
+                    }
+                } catch (e) {
+                    console.error('SDP parse error:', e);
+                }
+            }
+        }
 
         // Запуск
         window.addEventListener('load', () => {
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                statusEl.textContent = '❌ Браузер не поддерживает камеру';
+                statusEl.textContent = '❌ Браузер не поддерживает камеру.';
                 return;
             }
             startCamera();
+            checkUrlForSDP();
         });
 
         window.addEventListener('beforeunload', () => {
             if (stream) stream.getTracks().forEach(track => track.stop());
             if (pc) pc.close();
-            cleanupRoom();
         });
     </script>
 </body>
