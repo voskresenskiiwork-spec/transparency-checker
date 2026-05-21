@@ -4,9 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>Прозрачность жидкости</title>
-    <!-- <script src="https://unpkg.com/peerjs@1.5.1/dist/peerjs.min.js"></script> -->
-<script src="https://unpkg.com/trystero@0.20.1/dist/trystero.min.js"></script>
-    <script src="https://unpkg.com/peerjs@1.5.1/dist/peerjs.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body {
@@ -182,25 +179,24 @@
             border: 1px solid #ddd;
             margin-top: 10px;
         }
-        .peer-connect {
-            margin-top: 10px;
-            display: flex;
-            gap: 8px;
-            justify-content: center;
-            align-items: center;
-            flex-wrap: wrap;
+        /* Ручной обмен SDP */
+        .sdp-block {
+            margin: 10px 0;
+            text-align: left;
         }
-        .peer-connect input {
-            padding: 8px;
-            border-radius: 8px;
-            border: 1px solid #ccc;
-            width: 200px;
-            font-size: 0.9rem;
+        .sdp-block textarea {
+            width: 100%;
+            height: 80px;
+            font-size: 0.7rem;
+            font-family: monospace;
+            resize: vertical;
+            margin: 5px 0;
         }
-        .peer-status {
-            font-size: 0.8rem;
-            margin-top: 4px;
-            color: #555;
+        .sdp-block button {
+            background: #8e44ad;
+            width: auto;
+            flex: none;
+            padding: 8px 15px;
         }
     </style>
 </head>
@@ -219,7 +215,7 @@
             <button id="resetBtn" disabled>🔄 Сброс</button>
             <button id="calibrateBtn" class="calibrate-btn" disabled>📏 Калибровать</button>
             <button id="recordBtn" class="record-btn" disabled>📝 Записать</button>
-            <button id="broadcastBtn" class="broadcast-btn" disabled>📡 Трансляция</button>
+            <button id="createOfferBtn" class="broadcast-btn" disabled>📡 Создать трансляцию</button>
         </div>
 
         <div class="threshold-row">
@@ -241,14 +237,26 @@
 
         <canvas id="trendCanvas" class="trend-canvas" width="500" height="150"></canvas>
 
-        <div style="margin-top: 10px;">
-            <div><strong>Ваш ID для трансляции:</strong> <span id="myPeerId">—</span></div>
-            <div id="peerStatus" class="peer-status">Сервер PeerJS не подключён</div>
+        <!-- Ручной обмен SDP -->
+        <div class="sdp-block" id="sdpOfferBlock">
+            <label>Ваш SDP (предложение):</label>
+            <textarea id="localSdp" readonly></textarea>
+            <button id="copyOfferBtn">📋 Копировать SDP</button>
         </div>
-        <div class="peer-connect">
-            <input type="text" id="remotePeerId" placeholder="ID для подключения">
-            <button id="connectBtn">🔗 Подключиться</button>
-            <button id="disconnectBtn" style="display:none;">❌ Отключиться</button>
+        <div class="sdp-block" id="sdpRemoteBlock">
+            <label>SDP от источника (вставьте сюда):</label>
+            <textarea id="remoteSdp" placeholder="Вставьте SDP предложение..."></textarea>
+            <button id="connectRemoteBtn">🔗 Подключиться (создать ответ)</button>
+        </div>
+        <div class="sdp-block" id="sdpAnswerBlock" style="display:none;">
+            <label>Ваш SDP ответа:</label>
+            <textarea id="localAnswerSdp" readonly></textarea>
+            <button id="copyAnswerBtn">📋 Копировать ответ</button>
+        </div>
+        <div class="sdp-block" id="sdpAcceptBlock" style="display:none;">
+            <label>SDP ответа от наблюдателя (вставьте сюда):</label>
+            <textarea id="remoteAnswerSdp" placeholder="Вставьте SDP ответ..."></textarea>
+            <button id="acceptAnswerBtn">✅ Принять ответ</button>
         </div>
 
         <div class="history" id="historyContainer">
@@ -265,7 +273,7 @@
         const resetBtn = document.getElementById('resetBtn');
         const calibrateBtn = document.getElementById('calibrateBtn');
         const recordBtn = document.getElementById('recordBtn');
-        const broadcastBtn = document.getElementById('broadcastBtn');
+        const createOfferBtn = document.getElementById('createOfferBtn');
         const transparencyEl = document.getElementById('transparencyValue');
         const brightnessEl = document.getElementById('brightnessValue');
         const indicatorEl = document.getElementById('indicator');
@@ -278,11 +286,20 @@
         const clearHistoryBtn = document.getElementById('clearHistoryBtn');
         const trendCanvas = document.getElementById('trendCanvas');
         const ctxTrend = trendCanvas.getContext('2d');
-        const remotePeerIdInput = document.getElementById('remotePeerId');
-        const connectBtn = document.getElementById('connectBtn');
-        const disconnectBtn = document.getElementById('disconnectBtn');
-        const myPeerIdSpan = document.getElementById('myPeerId');
-        const peerStatusSpan = document.getElementById('peerStatus');
+        
+        // Элементы SDP
+        const localSdpTextarea = document.getElementById('localSdp');
+        const remoteSdpTextarea = document.getElementById('remoteSdp');
+        const copyOfferBtn = document.getElementById('copyOfferBtn');
+        const connectRemoteBtn = document.getElementById('connectRemoteBtn');
+        const localAnswerSdpTextarea = document.getElementById('localAnswerSdp');
+        const copyAnswerBtn = document.getElementById('copyAnswerBtn');
+        const remoteAnswerSdpTextarea = document.getElementById('remoteAnswerSdp');
+        const acceptAnswerBtn = document.getElementById('acceptAnswerBtn');
+        const sdpAnswerBlock = document.getElementById('sdpAnswerBlock');
+        const sdpAcceptBlock = document.getElementById('sdpAcceptBlock');
+        const sdpOfferBlock = document.getElementById('sdpOfferBlock');
+        const sdpRemoteBlock = document.getElementById('sdpRemoteBlock');
 
         let stream = null;
         let analysisRegion = null;
@@ -292,13 +309,15 @@
         let currentTransparency = 0;
         let currentBrightness = 0;
         let trendData = [];
-        let peer = null;
-        let remoteConnection = null;
+
+        // WebRTC ручной обмен
+        let localPc = null;   // для создателя предложения (телефон)
+        let remotePc = null;  // для принимающего (компьютер)
         let dataChannel = null;
         let isBroadcasting = false;
         let isReceiving = false;
 
-        // Дата/время
+        // Дата и время
         function updateDateTime() {
             const now = new Date();
             datetimeEl.textContent = now.toLocaleString('ru-RU', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit' });
@@ -306,7 +325,7 @@
         setInterval(updateDateTime, 1000);
         updateDateTime();
 
-        // График тренда
+        // График
         function drawTrend() {
             ctxTrend.clearRect(0, 0, trendCanvas.width, trendCanvas.height);
             if (trendData.length < 2) return;
@@ -360,17 +379,17 @@
             video.srcObject = stream;
             video.onloadedmetadata = () => {
                 video.play();
-                statusEl.textContent = '✅ Камера работает. Выберите область и/или выполните калибровку.';
+                statusEl.textContent = '✅ Камера работает. Выберите область.';
                 areaBtn.disabled = false;
                 calibrateBtn.disabled = false;
                 recordBtn.disabled = false;
-                broadcastBtn.disabled = false;
+                createOfferBtn.disabled = false;
                 resetBtn.disabled = true;
                 startAnalysis();
             };
         }
 
-        // Выбор области (touch/mouse)
+        // Выбор области
         function getCoords(e) {
             const rect = video.getBoundingClientRect();
             const clientX = e.touches ? e.touches[0].clientX : e.clientX;
@@ -398,10 +417,8 @@
             if (!isSelecting || startX === undefined) return;
             e.preventDefault();
             const { x, y } = getCoords(e);
-            const left = Math.min(startX, x);
-            const top = Math.min(startY, y);
-            regionSelector.style.left = left + 'px';
-            regionSelector.style.top = top + 'px';
+            regionSelector.style.left = Math.min(startX, x) + 'px';
+            regionSelector.style.top = Math.min(startY, y) + 'px';
             regionSelector.style.width = Math.abs(x - startX) + 'px';
             regionSelector.style.height = Math.abs(y - startY) + 'px';
         }
@@ -421,7 +438,7 @@
             areaBtn.textContent = '🎯 Область';
             areaBtn.style.background = '#3498db';
             resetBtn.disabled = false;
-            statusEl.textContent = '✅ Область выбрана. Идёт анализ...';
+            statusEl.textContent = '✅ Область выбрана.';
             removeSelectionListeners();
         }
         function addSelectionListeners() {
@@ -445,9 +462,7 @@
             if (isSelecting) {
                 isSelecting = false;
                 areaBtn.textContent = '🎯 Область';
-                areaBtn.style.background = '#3498db';
                 regionSelector.style.display = 'none';
-                statusEl.textContent = 'Выбор области отменён.';
                 removeSelectionListeners();
                 return;
             }
@@ -455,8 +470,6 @@
             isSelecting = true;
             areaBtn.textContent = '✋ Отменить';
             areaBtn.style.background = '#e67e22';
-            statusEl.textContent = 'Выделите область пальцем или мышью';
-            startX = undefined; startY = undefined;
             addSelectionListeners();
         });
 
@@ -464,37 +477,31 @@
             analysisRegion = null;
             regionSelector.style.display = 'none';
             resetBtn.disabled = true;
-            statusEl.textContent = '🔄 Область сброшена. Анализ по всему кадру.';
+            statusEl.textContent = '🔄 Область сброшена.';
         });
 
         // Калибровка
         calibrateBtn.addEventListener('click', () => {
             if (!stream) return;
             calibrationBrightness = currentBrightness;
-            statusEl.textContent = `📏 Калибровка выполнена! Яркость ${calibrationBrightness.toFixed(1)} = 100%`;
+            statusEl.textContent = `📏 Калибровка: ${calibrationBrightness.toFixed(1)} = 100%`;
         });
 
         // История
         function addHistoryRecord() {
             const now = new Date();
-            const timeStr = now.toLocaleTimeString('ru-RU');
-            const dateStr = now.toLocaleDateString('ru-RU');
             const threshold = parseFloat(thresholdInput.value) || 70;
             const warning = currentTransparency < threshold ? '⚠️ WARNING' : '✅ Норма';
             const div = document.createElement('div');
             div.className = 'history-item';
-            div.innerHTML = `<span>${dateStr} ${timeStr}</span> <span>Прозр: ${currentTransparency.toFixed(1)}%</span> <span>${warning}</span>`;
+            div.innerHTML = `<span>${now.toLocaleTimeString('ru-RU')}</span> <span>${currentTransparency.toFixed(1)}%</span> <span>${warning}</span>`;
             historyList.prepend(div);
         }
-
         recordBtn.addEventListener('click', () => {
             if (!stream) return;
             addHistoryRecord();
         });
-
-        clearHistoryBtn.addEventListener('click', () => {
-            historyList.innerHTML = '';
-        });
+        clearHistoryBtn.addEventListener('click', () => historyList.innerHTML = '');
 
         // Анализ кадра
         function analyzeFrame() {
@@ -521,17 +528,11 @@
 
             const data = imageData.data;
             let totalBrightness = 0;
-            const pixelCount = data.length / 4;
             for (let i = 0; i < data.length; i += 4) {
                 totalBrightness += 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
             }
-            currentBrightness = totalBrightness / pixelCount;
-
-            if (calibrationBrightness && calibrationBrightness > 0) {
-                currentTransparency = Math.min(100, (currentBrightness / calibrationBrightness) * 100);
-            } else {
-                currentTransparency = Math.min(100, (currentBrightness / 255) * 100);
-            }
+            currentBrightness = totalBrightness / (data.length / 4);
+            currentTransparency = calibrationBrightness ? Math.min(100, (currentBrightness / calibrationBrightness) * 100) : Math.min(100, (currentBrightness / 255) * 100);
             currentTransparency = Math.max(0, currentTransparency);
 
             transparencyEl.textContent = currentTransparency.toFixed(1) + '%';
@@ -541,15 +542,9 @@
             const threshold = parseFloat(thresholdInput.value) || 70;
             warningMsg.textContent = currentTransparency < threshold ? '⚠️ WARNING: Прозрачность ниже порога!' : '';
 
-            let quality = '';
-            if (currentTransparency > 90) quality = '💧 Очень прозрачная';
-            else if (currentTransparency > 70) quality = '💧 Прозрачная';
-            else if (currentTransparency > 50) quality = '🌫️ Средняя мутность';
-            else if (currentTransparency > 30) quality = '🌫️ Мутная';
-            else quality = '⬛ Очень мутная';
-            statusEl.textContent = quality;
-
             addTrendPoint(currentTransparency);
+
+            // Отправка данных через DataChannel (если открыт)
             if (dataChannel && dataChannel.readyState === 'open') {
                 dataChannel.send(JSON.stringify({ transparency: currentTransparency, brightness: currentBrightness }));
             }
@@ -562,57 +557,124 @@
             analyzeFrame();
         }
 
-        // PeerJS трансляция
-       // Замените ваш текущий код для PeerJS на этот
-let room; // Объект комнаты Trystero
-const ROOM_NAME = 'my-transparency-checker-room'; // Общее имя комнаты
+        // ========== РУЧНОЙ ОБМЕН SDP ==========
 
-// ... ваш остальной код (DOM-элементы, stream, analyzeFrame и т.д.) ...
+        // Создание предложения (телефон)
+        async function createOffer() {
+            localPc = new RTCPeerConnection({ iceTransportPolicy: 'all' });
+            stream.getTracks().forEach(track => localPc.addTrack(track, stream));
+            
+            // DataChannel для данных
+            dataChannel = localPc.createDataChannel('transparency');
+            dataChannel.onopen = () => statusEl.textContent = 'Канал данных открыт, передача прозрачности...';
+            dataChannel.onclose = () => statusEl.textContent = 'Канал данных закрыт';
 
-// --- Функции для Trystero ---
-function initBroadcast() {
-    // Используем стратегию BitTorrent (не требует серверов)
-    room = trystero.joinRoom({ appId: ROOM_NAME }, 'torrent');
+            localPc.onicecandidate = (e) => {
+                if (!e.candidate) {
+                    // Сбор ICE завершён, показываем полный SDP
+                    localSdpTextarea.value = JSON.stringify(localPc.localDescription);
+                }
+            };
 
-    // Когда другое устройство заходит в комнату, отправляем ему наше видео
-    room.onPeerJoin((peerId) => {
-        console.log('Новый участник в комнате:', peerId);
-        if (stream) {
-            // Отправляем наш видеопоток
-            room.addStream(stream, peerId);
-            // Начинаем отправлять данные о прозрачности
-            if (dataChannel) clearInterval(dataChannel);
-            dataChannel = setInterval(() => {
-                room.send({ transparency: currentTransparency, brightness: currentBrightness }, peerId);
-            }, 500);
+            const offer = await localPc.createOffer();
+            await localPc.setLocalDescription(offer);
+            // ICE кандидаты соберутся, после этого в поле появится SDP
+            sdpOfferBlock.style.display = 'block';
+            sdpAcceptBlock.style.display = 'block'; // показываем поле для ответа
+            statusEl.textContent = 'Скопируйте SDP предложения и передайте на другое устройство.';
+            createOfferBtn.disabled = true;
         }
-    });
 
-    // Принимаем видеопоток от другого устройства
-    room.onPeerStream((stream, peerId) => {
-        console.log('Получен поток от:', peerId);
-        video.srcObject = stream;
-        isReceiving = true;
-        areaBtn.disabled = true;
-        calibrateBtn.disabled = true;
-        broadcastBtn.disabled = true;
-    });
+        // Принятие ответа на телефоне
+        async function acceptAnswer() {
+            const answerStr = remoteAnswerSdpTextarea.value.trim();
+            if (!answerStr || !localPc) return alert('Вставьте SDP ответа');
+            try {
+                const answerDesc = JSON.parse(answerStr);
+                await localPc.setRemoteDescription(new RTCSessionDescription(answerDesc));
+                statusEl.textContent = 'Соединение установлено! Трансляция идёт.';
+                isBroadcasting = true;
+            } catch (e) {
+                alert('Ошибка принятия ответа: ' + e.message);
+            }
+        }
 
-    // Принимаем данные о прозрачности
-    room.onPeerData((data, peerId) => {
-        currentTransparency = data.transparency;
-        currentBrightness = data.brightness;
-        // ... обновление UI ...
-    });
-}
+        // Подключение к предложению (компьютер)
+        async function connectToRemote() {
+            const offerStr = remoteSdpTextarea.value.trim();
+            if (!offerStr) return alert('Вставьте SDP предложение от источника');
+            
+            remotePc = new RTCPeerConnection();
+            remotePc.ontrack = (event) => {
+                video.srcObject = event.streams[0];
+                isReceiving = true;
+                statusEl.textContent = 'Видео получено!';
+                areaBtn.disabled = true;
+                calibrateBtn.disabled = true;
+                createOfferBtn.disabled = true;
+            };
 
-function startBroadcast() {
-    if (!room) initBroadcast();
-    isBroadcasting = true;
-    // ... обновление кнопок и статуса ...
-}
+            remotePc.ondatachannel = (event) => {
+                const receiveChannel = event.channel;
+                receiveChannel.onmessage = (e) => {
+                    const data = JSON.parse(e.data);
+                    currentTransparency = data.transparency;
+                    currentBrightness = data.brightness;
+                    transparencyEl.textContent = currentTransparency.toFixed(1) + '%';
+                    brightnessEl.textContent = currentBrightness.toFixed(1);
+                    indicatorEl.style.left = currentTransparency + '%';
+                    addTrendPoint(currentTransparency);
+                    const threshold = parseFloat(thresholdInput.value) || 70;
+                    warningMsg.textContent = currentTransparency < threshold ? '⚠️ WARNING: Прозрачность ниже порога!' : '';
+                };
+            };
 
-// ... остальные функции ...
+            remotePc.onicecandidate = (e) => {
+                if (!e.candidate) {
+                    localAnswerSdpTextarea.value = JSON.stringify(remotePc.localDescription);
+                    sdpAnswerBlock.style.display = 'block';
+                    statusEl.textContent = 'Скопируйте SDP ответа и отправьте обратно источнику.';
+                }
+            };
+
+            try {
+                const offerDesc = JSON.parse(offerStr);
+                await remotePc.setRemoteDescription(new RTCSessionDescription(offerDesc));
+                const answer = await remotePc.createAnswer();
+                await remotePc.setLocalDescription(answer);
+            } catch (e) {
+                alert('Ошибка подключения: ' + e.message);
+            }
+        }
+
+        // Копирование SDP
+        function copyToClipboard(textarea) {
+            textarea.select();
+            document.execCommand('copy');
+            alert('Скопировано в буфер обмена');
+        }
+
+        // Назначение обработчиков
+        createOfferBtn.addEventListener('click', createOffer);
+        acceptAnswerBtn.addEventListener('click', acceptAnswer);
+        connectRemoteBtn.addEventListener('click', connectToRemote);
+        copyOfferBtn.addEventListener('click', () => copyToClipboard(localSdpTextarea));
+        copyAnswerBtn.addEventListener('click', () => copyToClipboard(localAnswerSdpTextarea));
+
+        // Запуск приложения
+        window.addEventListener('load', () => {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                statusEl.textContent = '❌ Браузер не поддерживает камеру.';
+                return;
+            }
+            startCamera();
+        });
+
+        window.addEventListener('beforeunload', () => {
+            if (stream) stream.getTracks().forEach(track => track.stop());
+            if (localPc) localPc.close();
+            if (remotePc) remotePc.close();
+        });
     </script>
 </body>
 </html>
