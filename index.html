@@ -145,6 +145,7 @@
     </div>
 
     <script>
+        // DOM элементы
         const video = document.getElementById('video');
         const areaBtn = document.getElementById('areaBtn');
         const resetBtn = document.getElementById('resetBtn');
@@ -163,35 +164,57 @@
         const trendCanvas = document.getElementById('trendCanvas');
         const ctxTrend = trendCanvas.getContext('2d');
 
-        let stream = null, analysisRegion = null, isSelecting = false, animationId = null;
-        let calibrationBrightness = null, currentTransparency = 0, currentBrightness = 0, trendData = [];
+        let stream = null;
+        let analysisRegion = null;
+        let isSelecting = false;
+        let animationId = null;
+        let calibrationBrightness = null;
+        let currentTransparency = 0;
+        let currentBrightness = 0;
+        let trendData = [];
 
         // Дата/время
         function updateDateTime() {
-            datetimeEl.textContent = new Date().toLocaleString('ru-RU', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit' });
+            const now = new Date();
+            datetimeEl.textContent = now.toLocaleString('ru-RU', { 
+                day: '2-digit', month: '2-digit', year: 'numeric', 
+                hour: '2-digit', minute: '2-digit', second: '2-digit' 
+            });
         }
         setInterval(updateDateTime, 1000);
         updateDateTime();
 
         // График
         function drawTrend() {
-            ctxTrend.clearRect(0,0,trendCanvas.width,trendCanvas.height);
-            if(trendData.length<2) return;
-            const w=trendCanvas.width, h=trendCanvas.height, points=trendData.slice(-30), xStep=w/(points.length-1);
-            ctxTrend.beginPath(); ctxTrend.strokeStyle='#3498db'; ctxTrend.lineWidth=2;
-            for(let i=0;i<points.length;i++) {
-                let x=i*xStep, y=h-(points[i].transparency/100)*h;
-                i===0?ctxTrend.moveTo(x,y):ctxTrend.lineTo(x,y);
+            ctxTrend.clearRect(0, 0, trendCanvas.width, trendCanvas.height);
+            if (trendData.length < 2) return;
+            const w = trendCanvas.width, h = trendCanvas.height;
+            const points = trendData.slice(-30);
+            const xStep = w / (points.length - 1);
+            ctxTrend.beginPath();
+            ctxTrend.strokeStyle = '#3498db';
+            ctxTrend.lineWidth = 2;
+            for (let i = 0; i < points.length; i++) {
+                const x = i * xStep;
+                const y = h - (points[i].transparency / 100) * h;
+                if (i === 0) ctxTrend.moveTo(x, y);
+                else ctxTrend.lineTo(x, y);
             }
             ctxTrend.stroke();
-            let threshold=parseFloat(thresholdInput.value)||70, yTh=h-(threshold/100)*h;
-            ctxTrend.beginPath(); ctxTrend.strokeStyle='#e74c3c'; ctxTrend.setLineDash([5,5]);
-            ctxTrend.moveTo(0,yTh); ctxTrend.lineTo(w,yTh); ctxTrend.stroke(); ctxTrend.setLineDash([]);
+            const threshold = parseFloat(thresholdInput.value) || 70;
+            const yThreshold = h - (threshold / 100) * h;
+            ctxTrend.beginPath();
+            ctxTrend.strokeStyle = '#e74c3c';
+            ctxTrend.setLineDash([5, 5]);
+            ctxTrend.moveTo(0, yThreshold);
+            ctxTrend.lineTo(w, yThreshold);
+            ctxTrend.stroke();
+            ctxTrend.setLineDash([]);
         }
 
-        function addTrendPoint(t) {
-            trendData.push({time:Date.now(), transparency:t});
-            if(trendData.length>60) trendData.shift();
+        function addTrendPoint(transparency) {
+            trendData.push({ time: Date.now(), transparency });
+            if (trendData.length > 60) trendData.shift();
             drawTrend();
         }
 
@@ -202,14 +225,18 @@
                     video: { facingMode: { ideal: 'environment' }, width: { ideal: 640 }, height: { ideal: 480 } },
                     audio: false
                 });
-            } catch(e) {
-                try { stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false }); }
-                catch(err) { statusEl.textContent='❌ Нет доступа к камере. Разрешите и перезагрузите.'; return; }
+            } catch (e) {
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                } catch (err) {
+                    statusEl.textContent = '❌ Нет доступа к камере. Разрешите и перезагрузите.';
+                    return;
+                }
             }
             video.srcObject = stream;
             video.onloadedmetadata = () => {
                 video.play();
-                statusEl.textContent = '✅ Камера готова. Выберите область анализа.';
+                statusEl.textContent = '✅ Камера работает. Выберите область для анализа.';
                 areaBtn.disabled = false;
                 calibrateBtn.disabled = false;
                 recordBtn.disabled = false;
@@ -217,93 +244,99 @@
             };
         }
 
-        // Выбор области
+        // Выбор области (мышь + тач)
         function getCoords(e) {
-            const r = video.getBoundingClientRect();
-            const cx = e.touches ? e.touches[0].clientX : e.clientX;
-            const cy = e.touches ? e.touches[0].clientY : e.clientY;
-            return { x: cx - r.left, y: cy - r.top, rectWidth: r.width, rectHeight: r.height };
+            const rect = video.getBoundingClientRect();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            return {
+                x: clientX - rect.left,
+                y: clientY - rect.top,
+                rectWidth: rect.width,
+                rectHeight: rect.height
+            };
         }
-        let sx, sy;
-        function pd(e) {
-            if(!isSelecting) return;
+        let startX, startY;
+        function onPointerDown(e) {
+            if (!isSelecting) return;
             e.preventDefault();
-            const p = getCoords(e);
-            sx = p.x; sy = p.y;
+            const { x, y } = getCoords(e);
+            startX = x; startY = y;
             regionSelector.style.display = 'block';
-            regionSelector.style.left = p.x+'px';
-            regionSelector.style.top = p.y+'px';
+            regionSelector.style.left = x + 'px';
+            regionSelector.style.top = y + 'px';
             regionSelector.style.width = '0px';
             regionSelector.style.height = '0px';
         }
-        function pm(e) {
-            if(!isSelecting || sx===undefined) return;
+        function onPointerMove(e) {
+            if (!isSelecting || startX === undefined) return;
             e.preventDefault();
-            const p = getCoords(e);
-            regionSelector.style.left = Math.min(sx, p.x)+'px';
-            regionSelector.style.top = Math.min(sy, p.y)+'px';
-            regionSelector.style.width = Math.abs(p.x-sx)+'px';
-            regionSelector.style.height = Math.abs(p.y-sy)+'px';
+            const { x, y } = getCoords(e);
+            regionSelector.style.left = Math.min(startX, x) + 'px';
+            regionSelector.style.top = Math.min(startY, y) + 'px';
+            regionSelector.style.width = Math.abs(x - startX) + 'px';
+            regionSelector.style.height = Math.abs(y - startY) + 'px';
         }
-        function pu(e) {
-            if(!isSelecting || sx===undefined) return;
+        function onPointerUp(e) {
+            if (!isSelecting || startX === undefined) return;
             e.preventDefault();
-            const p = getCoords(e);
-            const scX = video.videoWidth / p.rectWidth;
-            const scY = video.videoHeight / p.rectHeight;
+            const { x, y, rectWidth, rectHeight } = getCoords(e);
+            const scaleX = video.videoWidth / rectWidth;
+            const scaleY = video.videoHeight / rectHeight;
             analysisRegion = {
-                x: Math.min(sx, p.x) * scX,
-                y: Math.min(sy, p.y) * scY,
-                width: Math.abs(p.x-sx) * scX,
-                height: Math.abs(p.y-sy) * scY
+                x: Math.min(startX, x) * scaleX,
+                y: Math.min(startY, y) * scaleY,
+                width: Math.abs(x - startX) * scaleX,
+                height: Math.abs(y - startY) * scaleY
             };
             isSelecting = false;
             areaBtn.textContent = '🎯 Область';
             areaBtn.style.background = '#3498db';
             resetBtn.disabled = false;
-            removeListeners();
+            removeSelectionListeners();
         }
-        function addListeners() {
-            video.addEventListener('mousedown', pd);
-            video.addEventListener('mousemove', pm);
-            video.addEventListener('mouseup', pu);
-            video.addEventListener('touchstart', pd, { passive: false });
-            video.addEventListener('touchmove', pm, { passive: false });
-            video.addEventListener('touchend', pu);
+        function addSelectionListeners() {
+            video.addEventListener('mousedown', onPointerDown);
+            video.addEventListener('mousemove', onPointerMove);
+            video.addEventListener('mouseup', onPointerUp);
+            video.addEventListener('touchstart', onPointerDown, { passive: false });
+            video.addEventListener('touchmove', onPointerMove, { passive: false });
+            video.addEventListener('touchend', onPointerUp);
         }
-        function removeListeners() {
-            video.removeEventListener('mousedown', pd);
-            video.removeEventListener('mousemove', pm);
-            video.removeEventListener('mouseup', pu);
-            video.removeEventListener('touchstart', pd);
-            video.removeEventListener('touchmove', pm);
-            video.removeEventListener('touchend', pu);
+        function removeSelectionListeners() {
+            video.removeEventListener('mousedown', onPointerDown);
+            video.removeEventListener('mousemove', onPointerMove);
+            video.removeEventListener('mouseup', onPointerUp);
+            video.removeEventListener('touchstart', onPointerDown);
+            video.removeEventListener('touchmove', onPointerMove);
+            video.removeEventListener('touchend', onPointerUp);
         }
 
-        areaBtn.addEventListener('click', ()=>{
-            if(isSelecting){
+        areaBtn.addEventListener('click', () => {
+            if (isSelecting) {
                 isSelecting = false;
                 areaBtn.textContent = '🎯 Область';
+                areaBtn.style.background = '#3498db';
                 regionSelector.style.display = 'none';
-                removeListeners();
+                removeSelectionListeners();
                 return;
             }
-            if(!stream) return;
+            if (!stream) return;
             isSelecting = true;
             areaBtn.textContent = '✋ Отменить';
             areaBtn.style.background = '#e67e22';
-            addListeners();
+            addSelectionListeners();
         });
 
-        resetBtn.addEventListener('click', ()=>{
+        resetBtn.addEventListener('click', () => {
             analysisRegion = null;
             regionSelector.style.display = 'none';
             resetBtn.disabled = true;
-            statusEl.textContent = '🔄 Область сброшена.';
+            statusEl.textContent = '🔄 Область сброшена. Анализ по всему кадру.';
         });
 
-        calibrateBtn.addEventListener('click', ()=>{
-            if(!stream) return;
+        calibrateBtn.addEventListener('click', () => {
+            if (!stream) return;
             calibrationBrightness = currentBrightness;
             statusEl.textContent = `📏 Калибровка: ${calibrationBrightness.toFixed(1)} = 100%`;
         });
@@ -317,14 +350,15 @@
             div.innerHTML = `<span>${now.toLocaleTimeString('ru-RU')}</span> <span>${currentTransparency.toFixed(1)}%</span> <span>${warning}</span>`;
             historyList.prepend(div);
         }
-        recordBtn.addEventListener('click', ()=>{
-            if(!stream) return;
+        recordBtn.addEventListener('click', () => {
+            if (!stream) return;
             addHistoryRecord();
         });
-        clearHistoryBtn.addEventListener('click', ()=> historyList.innerHTML='' );
+        clearHistoryBtn.addEventListener('click', () => historyList.innerHTML = '');
 
+        // Анализ кадра
         function analyzeFrame() {
-            if(!stream || video.readyState < 2) {
+            if (!stream || video.readyState < 2) {
                 animationId = requestAnimationFrame(analyzeFrame);
                 return;
             }
@@ -334,24 +368,25 @@
             const ctx = canvas.getContext('2d');
             ctx.drawImage(video, 0, 0);
 
-            let imgData;
-            if(analysisRegion) {
-                const rx = Math.max(0, Math.min(analysisRegion.x, canvas.width-1));
-                const ry = Math.max(0, Math.min(analysisRegion.y, canvas.height-1));
-                const rw = Math.max(1, Math.min(analysisRegion.width, canvas.width-rx));
-                const rh = Math.max(1, Math.min(analysisRegion.height, canvas.height-ry));
-                imgData = ctx.getImageData(rx, ry, rw, rh);
+            let imageData;
+            if (analysisRegion) {
+                const rx = Math.max(0, Math.min(analysisRegion.x, canvas.width - 1));
+                const ry = Math.max(0, Math.min(analysisRegion.y, canvas.height - 1));
+                const rw = Math.max(1, Math.min(analysisRegion.width, canvas.width - rx));
+                const rh = Math.max(1, Math.min(analysisRegion.height, canvas.height - ry));
+                imageData = ctx.getImageData(rx, ry, rw, rh);
             } else {
-                imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
             }
 
-            const data = imgData.data;
-            let total = 0;
-            for(let i=0; i<data.length; i+=4) {
-                total += 0.299*data[i] + 0.587*data[i+1] + 0.114*data[i+2];
+            const data = imageData.data;
+            let totalBrightness = 0;
+            for (let i = 0; i < data.length; i += 4) {
+                totalBrightness += 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
             }
-            currentBrightness = total / (data.length/4);
-            if(calibrationBrightness && calibrationBrightness>0) {
+            currentBrightness = totalBrightness / (data.length / 4);
+            
+            if (calibrationBrightness && calibrationBrightness > 0) {
                 currentTransparency = Math.min(100, (currentBrightness / calibrationBrightness) * 100);
             } else {
                 currentTransparency = Math.min(100, (currentBrightness / 255) * 100);
@@ -370,20 +405,21 @@
         }
 
         function startAnalysis() {
-            if(animationId) cancelAnimationFrame(animationId);
+            if (animationId) cancelAnimationFrame(animationId);
             analyzeFrame();
         }
 
-        window.addEventListener('load', ()=>{
-            if(!navigator.mediaDevices?.getUserMedia) {
+        // Запуск при загрузке
+        window.addEventListener('load', () => {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
                 statusEl.textContent = '❌ Браузер не поддерживает камеру.';
                 return;
             }
             startCamera();
         });
 
-        window.addEventListener('beforeunload', ()=>{
-            if(stream) stream.getTracks().forEach(t=>t.stop());
+        window.addEventListener('beforeunload', () => {
+            if (stream) stream.getTracks().forEach(track => track.stop());
         });
     </script>
 </body>
