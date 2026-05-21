@@ -67,7 +67,6 @@
         button:disabled { background: #bdc3c7; transform: none; }
         .calibrate-btn { background: #27ae60; }
         .record-btn { background: #f39c12; }
-        .broadcast-btn { background: #8e44ad; }
         .threshold-row {
             display: flex; align-items: center; justify-content: center; gap: 10px; margin: 10px 0; flex-wrap: wrap;
         }
@@ -108,11 +107,6 @@
             width: 100%; height: 150px; background: #fff; border-radius: 10px;
             border: 1px solid #ddd; margin-top: 10px;
         }
-        .room-block { margin: 10px 0; }
-        .room-block input {
-            padding: 10px; border-radius: 8px; border: 1px solid #ccc; width: 60%;
-            font-size: 1rem; text-align: center;
-        }
     </style>
 </head>
 <body>
@@ -122,10 +116,6 @@
         <div class="video-wrapper" id="videoWrapper">
             <video id="video" autoplay playsinline muted></video>
             <div id="regionSelector" class="region-selector"></div>
-        </div>
-        <div class="room-block">
-            <input type="text" id="roomInput" placeholder="Имя комнаты">
-            <button id="joinRoomBtn">🔗 Войти в комнату</button>
         </div>
         <div class="controls">
             <button id="areaBtn" disabled>🎯 Область</button>
@@ -155,18 +145,11 @@
     </div>
 
     <script>
-        // ---------- НАСТРОЙКА: вставьте URL вашей Firebase Realtime Database ----------
-        const DB_URL = ‘https://polina-17036-default-rtdb.asia-southeast1.firebasedatabase.app/';
-        // ---------------------------------------------------------------------------
-
-        // DOM
         const video = document.getElementById('video');
         const areaBtn = document.getElementById('areaBtn');
         const resetBtn = document.getElementById('resetBtn');
         const calibrateBtn = document.getElementById('calibrateBtn');
         const recordBtn = document.getElementById('recordBtn');
-        const joinRoomBtn = document.getElementById('joinRoomBtn');
-        const roomInput = document.getElementById('roomInput');
         const transparencyEl = document.getElementById('transparencyValue');
         const brightnessEl = document.getElementById('brightnessValue');
         const indicatorEl = document.getElementById('indicator');
@@ -182,15 +165,15 @@
 
         let stream = null, analysisRegion = null, isSelecting = false, animationId = null;
         let calibrationBrightness = null, currentTransparency = 0, currentBrightness = 0, trendData = [];
-        let pc = null, dataChannel = null, isBroadcaster = false;
-        let currentRoom = null, unsubscribe = null;
 
+        // Дата/время
         function updateDateTime() {
             datetimeEl.textContent = new Date().toLocaleString('ru-RU', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit' });
         }
         setInterval(updateDateTime, 1000);
         updateDateTime();
 
+        // График
         function drawTrend() {
             ctxTrend.clearRect(0,0,trendCanvas.width,trendCanvas.height);
             if(trendData.length<2) return;
@@ -206,190 +189,201 @@
             ctxTrend.moveTo(0,yTh); ctxTrend.lineTo(w,yTh); ctxTrend.stroke(); ctxTrend.setLineDash([]);
         }
 
-        function addTrendPoint(t) { trendData.push({time:Date.now(), transparency:t}); if(trendData.length>60) trendData.shift(); drawTrend(); }
+        function addTrendPoint(t) {
+            trendData.push({time:Date.now(), transparency:t});
+            if(trendData.length>60) trendData.shift();
+            drawTrend();
+        }
 
+        // Камера
         async function startCamera() {
             try {
                 stream = await navigator.mediaDevices.getUserMedia({
-                    video:{facingMode:{ideal:'environment'},width:{ideal:640},height:{ideal:480}}, audio:false
+                    video: { facingMode: { ideal: 'environment' }, width: { ideal: 640 }, height: { ideal: 480 } },
+                    audio: false
                 });
             } catch(e) {
-                try { stream = await navigator.mediaDevices.getUserMedia({video:true, audio:false}); }
-                catch(err) { statusEl.textContent='❌ Нет доступа к камере'; return; }
+                try { stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false }); }
+                catch(err) { statusEl.textContent='❌ Нет доступа к камере. Разрешите и перезагрузите.'; return; }
             }
             video.srcObject = stream;
-            video.onloadedmetadata = () => { video.play(); statusEl.textContent='✅ Камера готова. Введите имя комнаты.';
-                areaBtn.disabled=false; calibrateBtn.disabled=false; recordBtn.disabled=false; joinRoomBtn.disabled=false;
+            video.onloadedmetadata = () => {
+                video.play();
+                statusEl.textContent = '✅ Камера готова. Выберите область анализа.';
+                areaBtn.disabled = false;
+                calibrateBtn.disabled = false;
+                recordBtn.disabled = false;
                 startAnalysis();
             };
         }
 
-        // область (без изменений, только имена функций)
+        // Выбор области
         function getCoords(e) {
-            const r=video.getBoundingClientRect(), cx=e.touches?e.touches[0].clientX:e.clientX, cy=e.touches?e.touches[0].clientY:e.clientY;
-            return {x:cx-r.left, y:cy-r.top, rectWidth:r.width, rectHeight:r.height};
+            const r = video.getBoundingClientRect();
+            const cx = e.touches ? e.touches[0].clientX : e.clientX;
+            const cy = e.touches ? e.touches[0].clientY : e.clientY;
+            return { x: cx - r.left, y: cy - r.top, rectWidth: r.width, rectHeight: r.height };
         }
-        let sx,sy;
-        function pd(e) { if(!isSelecting)return; e.preventDefault(); let p=getCoords(e); sx=p.x; sy=p.y;
-            regionSelector.style.display='block'; regionSelector.style.left=p.x+'px'; regionSelector.style.top=p.y+'px';
-            regionSelector.style.width='0px'; regionSelector.style.height='0px'; }
-        function pm(e) { if(!isSelecting||sx===undefined)return; e.preventDefault(); let p=getCoords(e);
-            regionSelector.style.left=Math.min(sx,p.x)+'px'; regionSelector.style.top=Math.min(sy,p.y)+'px';
-            regionSelector.style.width=Math.abs(p.x-sx)+'px'; regionSelector.style.height=Math.abs(p.y-sy)+'px'; }
-        function pu(e) { if(!isSelecting||sx===undefined)return; e.preventDefault(); let p=getCoords(e);
-            let scX=video.videoWidth/p.rectWidth, scY=video.videoHeight/p.rectHeight;
-            analysisRegion={ x:Math.min(sx,p.x)*scX, y:Math.min(sy,p.y)*scY, width:Math.abs(p.x-sx)*scX, height:Math.abs(p.y-sy)*scY };
-            isSelecting=false; areaBtn.textContent='🎯 Область'; areaBtn.style.background='#3498db'; resetBtn.disabled=false;
-            removeListeners(); }
+        let sx, sy;
+        function pd(e) {
+            if(!isSelecting) return;
+            e.preventDefault();
+            const p = getCoords(e);
+            sx = p.x; sy = p.y;
+            regionSelector.style.display = 'block';
+            regionSelector.style.left = p.x+'px';
+            regionSelector.style.top = p.y+'px';
+            regionSelector.style.width = '0px';
+            regionSelector.style.height = '0px';
+        }
+        function pm(e) {
+            if(!isSelecting || sx===undefined) return;
+            e.preventDefault();
+            const p = getCoords(e);
+            regionSelector.style.left = Math.min(sx, p.x)+'px';
+            regionSelector.style.top = Math.min(sy, p.y)+'px';
+            regionSelector.style.width = Math.abs(p.x-sx)+'px';
+            regionSelector.style.height = Math.abs(p.y-sy)+'px';
+        }
+        function pu(e) {
+            if(!isSelecting || sx===undefined) return;
+            e.preventDefault();
+            const p = getCoords(e);
+            const scX = video.videoWidth / p.rectWidth;
+            const scY = video.videoHeight / p.rectHeight;
+            analysisRegion = {
+                x: Math.min(sx, p.x) * scX,
+                y: Math.min(sy, p.y) * scY,
+                width: Math.abs(p.x-sx) * scX,
+                height: Math.abs(p.y-sy) * scY
+            };
+            isSelecting = false;
+            areaBtn.textContent = '🎯 Область';
+            areaBtn.style.background = '#3498db';
+            resetBtn.disabled = false;
+            removeListeners();
+        }
         function addListeners() {
-            video.addEventListener('mousedown',pd); video.addEventListener('mousemove',pm); video.addEventListener('mouseup',pu);
-            video.addEventListener('touchstart',pd,{passive:false}); video.addEventListener('touchmove',pm,{passive:false}); video.addEventListener('touchend',pu);
+            video.addEventListener('mousedown', pd);
+            video.addEventListener('mousemove', pm);
+            video.addEventListener('mouseup', pu);
+            video.addEventListener('touchstart', pd, { passive: false });
+            video.addEventListener('touchmove', pm, { passive: false });
+            video.addEventListener('touchend', pu);
         }
         function removeListeners() {
-            video.removeEventListener('mousedown',pd); video.removeEventListener('mousemove',pm); video.removeEventListener('mouseup',pu);
-            video.removeEventListener('touchstart',pd); video.removeEventListener('touchmove',pm); video.removeEventListener('touchend',pu);
+            video.removeEventListener('mousedown', pd);
+            video.removeEventListener('mousemove', pm);
+            video.removeEventListener('mouseup', pu);
+            video.removeEventListener('touchstart', pd);
+            video.removeEventListener('touchmove', pm);
+            video.removeEventListener('touchend', pu);
         }
 
         areaBtn.addEventListener('click', ()=>{
-            if(isSelecting){ isSelecting=false; areaBtn.textContent='🎯 Область'; regionSelector.style.display='none'; removeListeners(); return; }
-            if(!stream) return; isSelecting=true; areaBtn.textContent='✋ Отменить'; areaBtn.style.background='#e67e22'; addListeners();
+            if(isSelecting){
+                isSelecting = false;
+                areaBtn.textContent = '🎯 Область';
+                regionSelector.style.display = 'none';
+                removeListeners();
+                return;
+            }
+            if(!stream) return;
+            isSelecting = true;
+            areaBtn.textContent = '✋ Отменить';
+            areaBtn.style.background = '#e67e22';
+            addListeners();
         });
-        resetBtn.addEventListener('click', ()=>{ analysisRegion=null; regionSelector.style.display='none'; resetBtn.disabled=true; statusEl.textContent='Область сброшена'; });
-        calibrateBtn.addEventListener('click', ()=>{ if(!stream) return; calibrationBrightness=currentBrightness; statusEl.textContent=`📏 Калибровка: ${calibrationBrightness.toFixed(1)}=100%`; });
+
+        resetBtn.addEventListener('click', ()=>{
+            analysisRegion = null;
+            regionSelector.style.display = 'none';
+            resetBtn.disabled = true;
+            statusEl.textContent = '🔄 Область сброшена.';
+        });
+
+        calibrateBtn.addEventListener('click', ()=>{
+            if(!stream) return;
+            calibrationBrightness = currentBrightness;
+            statusEl.textContent = `📏 Калибровка: ${calibrationBrightness.toFixed(1)} = 100%`;
+        });
 
         function addHistoryRecord() {
-            let d=new Date(), th=parseFloat(thresholdInput.value)||70, w=currentTransparency<th?'⚠️ WARNING':'✅ Норма';
-            let div=document.createElement('div'); div.className='history-item';
-            div.innerHTML=`<span>${d.toLocaleTimeString('ru-RU')}</span> <span>${currentTransparency.toFixed(1)}%</span> <span>${w}</span>`;
+            const now = new Date();
+            const threshold = parseFloat(thresholdInput.value) || 70;
+            const warning = currentTransparency < threshold ? '⚠️ WARNING' : '✅ Норма';
+            const div = document.createElement('div');
+            div.className = 'history-item';
+            div.innerHTML = `<span>${now.toLocaleTimeString('ru-RU')}</span> <span>${currentTransparency.toFixed(1)}%</span> <span>${warning}</span>`;
             historyList.prepend(div);
         }
-        recordBtn.addEventListener('click', ()=>{ if(!stream) return; addHistoryRecord(); });
+        recordBtn.addEventListener('click', ()=>{
+            if(!stream) return;
+            addHistoryRecord();
+        });
         clearHistoryBtn.addEventListener('click', ()=> historyList.innerHTML='' );
 
         function analyzeFrame() {
-            if(!stream||video.readyState<2) { animationId=requestAnimationFrame(analyzeFrame); return; }
-            let c=document.createElement('canvas'); c.width=video.videoWidth; c.height=video.videoHeight;
-            let ctx=c.getContext('2d'); ctx.drawImage(video,0,0);
+            if(!stream || video.readyState < 2) {
+                animationId = requestAnimationFrame(analyzeFrame);
+                return;
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0);
+
             let imgData;
             if(analysisRegion) {
-                let rx=Math.max(0,Math.min(analysisRegion.x,c.width-1)), ry=Math.max(0,Math.min(analysisRegion.y,c.height-1));
-                let rw=Math.max(1,Math.min(analysisRegion.width,c.width-rx)), rh=Math.max(1,Math.min(analysisRegion.height,c.height-ry));
-                imgData=ctx.getImageData(rx,ry,rw,rh);
-            } else imgData=ctx.getImageData(0,0,c.width,c.height);
-            let data=imgData.data, total=0;
-            for(let i=0;i<data.length;i+=4) total+=0.299*data[i]+0.587*data[i+1]+0.114*data[i+2];
-            currentBrightness=total/(data.length/4);
-            currentTransparency=calibrationBrightness?Math.min(100,(currentBrightness/calibrationBrightness)*100):Math.min(100,(currentBrightness/255)*100);
-            currentTransparency=Math.max(0,currentTransparency);
-            transparencyEl.textContent=currentTransparency.toFixed(1)+'%';
-            brightnessEl.textContent=currentBrightness.toFixed(1);
-            indicatorEl.style.left=currentTransparency+'%';
-            warningMsg.textContent=currentTransparency<(parseFloat(thresholdInput.value)||70)?'⚠️ WARNING: Прозрачность ниже порога!':'';
-            addTrendPoint(currentTransparency);
-            if(dataChannel&&dataChannel.readyState==='open'&&isBroadcaster)
-                dataChannel.send(JSON.stringify({transparency:currentTransparency, brightness:currentBrightness}));
-            animationId=requestAnimationFrame(analyzeFrame);
-        }
-        function startAnalysis() { if(animationId) cancelAnimationFrame(animationId); analyzeFrame(); }
-
-        // ---------- Firebase signalling ----------
-        async function send(path, data) {
-            await fetch(DB_URL + path + '.json', { method:'PUT', body:JSON.stringify(data) });
-        }
-        function listen(path, callback) {
-            let es = new EventSource(DB_URL + path + '.json');
-            es.onmessage = e => { if(e.data && e.data!=='null') callback(JSON.parse(e.data)); };
-            es.onerror = () => es.close();
-            return () => es.close();
-        }
-
-        joinRoomBtn.addEventListener('click', async ()=>{
-            let room = roomInput.value.trim();
-            if(!room) return alert('Введите имя комнаты');
-            if(!stream) return alert('Камера не готова');
-            if(unsubscribe) unsubscribe();
-            if(pc) { pc.close(); pc=null; }
-            currentRoom = room;
-            statusEl.textContent = 'Входим в комнату...';
-            joinRoomBtn.disabled = true;
-
-            // Создаём RTCPeerConnection
-            pc = new RTCPeerConnection({ iceServers:[{urls:'stun:stun.l.google.com:19302'}] });
-            stream.getTracks().forEach(t=>pc.addTrack(t,stream));
-
-            pc.onicecandidate = e => {
-                if(e.candidate) send(`rooms/${room}/ice`, {candidate:e.candidate});
-            };
-            pc.ontrack = e => {
-                video.srcObject = e.streams[0];
-                statusEl.textContent = '📡 Видео получено!';
-                areaBtn.disabled = true; calibrateBtn.disabled = true;
-            };
-            pc.ondatachannel = e => {
-                dataChannel = e.channel;
-                dataChannel.onmessage = ev => {
-                    let d = JSON.parse(ev.data);
-                    currentTransparency = d.transparency; currentBrightness = d.brightness;
-                    transparencyEl.textContent = currentTransparency.toFixed(1)+'%';
-                    brightnessEl.textContent = currentBrightness.toFixed(1);
-                    indicatorEl.style.left = currentTransparency+'%';
-                    addTrendPoint(currentTransparency);
-                    warningMsg.textContent = currentTransparency<(parseFloat(thresholdInput.value)||70)?'⚠️ WARNING: Прозрачность ниже порога!':'';
-                };
-            };
-
-            // Пытаемся создать комнату (offer)
-            try {
-                // Проверим, существует ли уже offer
-                let check = await fetch(DB_URL + `rooms/${room}/offer.json`);
-                let hasOffer = await check.json();
-                if(!hasOffer) {
-                    // Мы вещатель
-                    isBroadcaster = true;
-                    dataChannel = pc.createDataChannel('transparency');
-                    let offer = await pc.createOffer();
-                    await pc.setLocalDescription(offer);
-                    await send(`rooms/${room}/offer`, pc.localDescription);
-                    statusEl.textContent = '📡 Ожидание подключения...';
-                    // Слушаем ответ
-                    unsubscribe = listen(`rooms/${room}/answer`, async (answer)=>{
-                        if(pc.signalingState!=='stable') {
-                            await pc.setRemoteDescription(new RTCSessionDescription(answer));
-                            statusEl.textContent = '✅ Наблюдатель подключён!';
-                        }
-                    });
-                    // Слушаем ICE от наблюдателя
-                    listen(`rooms/${room}/ice`, (c)=>{
-                        if(c.candidate) pc.addIceCandidate(new RTCIceCandidate(c.candidate));
-                    });
-                } else {
-                    // Мы наблюдатель
-                    isBroadcaster = false;
-                    let offer = hasOffer;
-                    await pc.setRemoteDescription(new RTCSessionDescription(offer));
-                    let answer = await pc.createAnswer();
-                    await pc.setLocalDescription(answer);
-                    await send(`rooms/${room}/answer`, pc.localDescription);
-                    statusEl.textContent = '🔗 Отправлен ответ, ждём видео...';
-                    // Слушаем ICE от вещателя
-                    unsubscribe = listen(`rooms/${room}/ice`, (c)=>{
-                        if(c.candidate) pc.addIceCandidate(new RTCIceCandidate(c.candidate));
-                    });
-                }
-            } catch(e) {
-                statusEl.textContent = 'Ошибка сигнализации: ' + e.message;
-                console.error(e);
+                const rx = Math.max(0, Math.min(analysisRegion.x, canvas.width-1));
+                const ry = Math.max(0, Math.min(analysisRegion.y, canvas.height-1));
+                const rw = Math.max(1, Math.min(analysisRegion.width, canvas.width-rx));
+                const rh = Math.max(1, Math.min(analysisRegion.height, canvas.height-ry));
+                imgData = ctx.getImageData(rx, ry, rw, rh);
+            } else {
+                imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
             }
-        });
+
+            const data = imgData.data;
+            let total = 0;
+            for(let i=0; i<data.length; i+=4) {
+                total += 0.299*data[i] + 0.587*data[i+1] + 0.114*data[i+2];
+            }
+            currentBrightness = total / (data.length/4);
+            if(calibrationBrightness && calibrationBrightness>0) {
+                currentTransparency = Math.min(100, (currentBrightness / calibrationBrightness) * 100);
+            } else {
+                currentTransparency = Math.min(100, (currentBrightness / 255) * 100);
+            }
+            currentTransparency = Math.max(0, currentTransparency);
+
+            transparencyEl.textContent = currentTransparency.toFixed(1) + '%';
+            brightnessEl.textContent = currentBrightness.toFixed(1);
+            indicatorEl.style.left = currentTransparency + '%';
+
+            const threshold = parseFloat(thresholdInput.value) || 70;
+            warningMsg.textContent = currentTransparency < threshold ? '⚠️ WARNING: Прозрачность ниже порога!' : '';
+
+            addTrendPoint(currentTransparency);
+            animationId = requestAnimationFrame(analyzeFrame);
+        }
+
+        function startAnalysis() {
+            if(animationId) cancelAnimationFrame(animationId);
+            analyzeFrame();
+        }
 
         window.addEventListener('load', ()=>{
-            if(!navigator.mediaDevices?.getUserMedia) { statusEl.textContent='❌ Нет поддержки камеры'; return; }
+            if(!navigator.mediaDevices?.getUserMedia) {
+                statusEl.textContent = '❌ Браузер не поддерживает камеру.';
+                return;
+            }
             startCamera();
         });
+
         window.addEventListener('beforeunload', ()=>{
             if(stream) stream.getTracks().forEach(t=>t.stop());
-            if(pc) pc.close();
-            if(unsubscribe) unsubscribe();
         });
     </script>
 </body>
