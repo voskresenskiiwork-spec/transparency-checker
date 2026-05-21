@@ -195,14 +195,6 @@
             width: 200px;
             font-size: 0.9rem;
         }
-        .peer-id-display {
-            font-weight: bold;
-            word-break: break-all;
-            background: #f0f0f0;
-            padding: 4px 8px;
-            border-radius: 6px;
-            margin: 5px 0;
-        }
         .peer-status {
             font-size: 0.8rem;
             margin-top: 4px;
@@ -247,7 +239,6 @@
 
         <canvas id="trendCanvas" class="trend-canvas" width="500" height="150"></canvas>
 
-        <!-- Блок трансляции -->
         <div style="margin-top: 10px;">
             <div><strong>Ваш ID для трансляции:</strong> <span id="myPeerId">—</span></div>
             <div id="peerStatus" class="peer-status">Сервер PeerJS не подключён</div>
@@ -266,7 +257,7 @@
     </div>
 
     <script>
-               // DOM элементы
+        // DOM элементы
         const video = document.getElementById('video');
         const areaBtn = document.getElementById('areaBtn');
         const resetBtn = document.getElementById('resetBtn');
@@ -305,80 +296,311 @@
         let isBroadcasting = false;
         let isReceiving = false;
 
-        // ... функции updateDateTime, drawTrend, addTrendPoint, startCamera,
-        // выбор области, калибровка, история, analyzeFrame, startAnalysis
-        // (они остаются без изменений, поэтому я их пропускаю для краткости,
-        // но в реальном коде они должны присутствовать полностью)
+        // Дата/время
+        function updateDateTime() {
+            const now = new Date();
+            datetimeEl.textContent = now.toLocaleString('ru-RU', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit' });
+        }
+        setInterval(updateDateTime, 1000);
+        updateDateTime();
 
-        // ====== PeerJS с улучшенной обработкой ======
+        // График тренда
+        function drawTrend() {
+            ctxTrend.clearRect(0, 0, trendCanvas.width, trendCanvas.height);
+            if (trendData.length < 2) return;
+            const w = trendCanvas.width;
+            const h = trendCanvas.height;
+            const maxPoints = 30;
+            const points = trendData.slice(-maxPoints);
+            const xStep = w / (points.length - 1);
+            ctxTrend.beginPath();
+            ctxTrend.strokeStyle = '#3498db';
+            ctxTrend.lineWidth = 2;
+            for (let i = 0; i < points.length; i++) {
+                const x = i * xStep;
+                const y = h - (points[i].transparency / 100) * h;
+                if (i === 0) ctxTrend.moveTo(x, y);
+                else ctxTrend.lineTo(x, y);
+            }
+            ctxTrend.stroke();
+            const threshold = parseFloat(thresholdInput.value) || 70;
+            const yThreshold = h - (threshold / 100) * h;
+            ctxTrend.beginPath();
+            ctxTrend.strokeStyle = '#e74c3c';
+            ctxTrend.setLineDash([5, 5]);
+            ctxTrend.moveTo(0, yThreshold);
+            ctxTrend.lineTo(w, yThreshold);
+            ctxTrend.stroke();
+            ctxTrend.setLineDash([]);
+        }
+
+        function addTrendPoint(transparency) {
+            trendData.push({ time: Date.now(), transparency });
+            if (trendData.length > 60) trendData.shift();
+            drawTrend();
+        }
+
+        // Запуск камеры
+        async function startCamera() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: { ideal: 'environment' }, width: { ideal: 640 }, height: { ideal: 480 } },
+                    audio: false
+                });
+            } catch (e) {
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                } catch (err) {
+                    statusEl.textContent = '❌ Нет доступа к камере. Разрешите и перезагрузите.';
+                    return;
+                }
+            }
+            video.srcObject = stream;
+            video.onloadedmetadata = () => {
+                video.play();
+                statusEl.textContent = '✅ Камера работает. Выберите область и/или выполните калибровку.';
+                areaBtn.disabled = false;
+                calibrateBtn.disabled = false;
+                recordBtn.disabled = false;
+                broadcastBtn.disabled = false;
+                resetBtn.disabled = true;
+                startAnalysis();
+            };
+        }
+
+        // Выбор области (touch/mouse)
+        function getCoords(e) {
+            const rect = video.getBoundingClientRect();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            return {
+                x: clientX - rect.left,
+                y: clientY - rect.top,
+                rectWidth: rect.width,
+                rectHeight: rect.height
+            };
+        }
+        let startX, startY;
+        function onPointerDown(e) {
+            if (!isSelecting) return;
+            e.preventDefault();
+            const { x, y } = getCoords(e);
+            startX = x; startY = y;
+            regionSelector.style.display = 'block';
+            regionSelector.style.left = x + 'px';
+            regionSelector.style.top = y + 'px';
+            regionSelector.style.width = '0px';
+            regionSelector.style.height = '0px';
+        }
+        function onPointerMove(e) {
+            if (!isSelecting || startX === undefined) return;
+            e.preventDefault();
+            const { x, y } = getCoords(e);
+            const left = Math.min(startX, x);
+            const top = Math.min(startY, y);
+            regionSelector.style.left = left + 'px';
+            regionSelector.style.top = top + 'px';
+            regionSelector.style.width = Math.abs(x - startX) + 'px';
+            regionSelector.style.height = Math.abs(y - startY) + 'px';
+        }
+        function onPointerUp(e) {
+            if (!isSelecting || startX === undefined) return;
+            e.preventDefault();
+            const { x, y, rectWidth, rectHeight } = getCoords(e);
+            const scaleX = video.videoWidth / rectWidth;
+            const scaleY = video.videoHeight / rectHeight;
+            analysisRegion = {
+                x: Math.min(startX, x) * scaleX,
+                y: Math.min(startY, y) * scaleY,
+                width: Math.abs(x - startX) * scaleX,
+                height: Math.abs(y - startY) * scaleY
+            };
+            isSelecting = false;
+            areaBtn.textContent = '🎯 Область';
+            areaBtn.style.background = '#3498db';
+            resetBtn.disabled = false;
+            statusEl.textContent = '✅ Область выбрана. Идёт анализ...';
+            removeSelectionListeners();
+        }
+        function addSelectionListeners() {
+            video.addEventListener('mousedown', onPointerDown);
+            video.addEventListener('mousemove', onPointerMove);
+            video.addEventListener('mouseup', onPointerUp);
+            video.addEventListener('touchstart', onPointerDown, { passive: false });
+            video.addEventListener('touchmove', onPointerMove, { passive: false });
+            video.addEventListener('touchend', onPointerUp);
+        }
+        function removeSelectionListeners() {
+            video.removeEventListener('mousedown', onPointerDown);
+            video.removeEventListener('mousemove', onPointerMove);
+            video.removeEventListener('mouseup', onPointerUp);
+            video.removeEventListener('touchstart', onPointerDown);
+            video.removeEventListener('touchmove', onPointerMove);
+            video.removeEventListener('touchend', onPointerUp);
+        }
+
+        areaBtn.addEventListener('click', () => {
+            if (isSelecting) {
+                isSelecting = false;
+                areaBtn.textContent = '🎯 Область';
+                areaBtn.style.background = '#3498db';
+                regionSelector.style.display = 'none';
+                statusEl.textContent = 'Выбор области отменён.';
+                removeSelectionListeners();
+                return;
+            }
+            if (!stream) return;
+            isSelecting = true;
+            areaBtn.textContent = '✋ Отменить';
+            areaBtn.style.background = '#e67e22';
+            statusEl.textContent = 'Выделите область пальцем или мышью';
+            startX = undefined; startY = undefined;
+            addSelectionListeners();
+        });
+
+        resetBtn.addEventListener('click', () => {
+            analysisRegion = null;
+            regionSelector.style.display = 'none';
+            resetBtn.disabled = true;
+            statusEl.textContent = '🔄 Область сброшена. Анализ по всему кадру.';
+        });
+
+        // Калибровка
+        calibrateBtn.addEventListener('click', () => {
+            if (!stream) return;
+            calibrationBrightness = currentBrightness;
+            statusEl.textContent = `📏 Калибровка выполнена! Яркость ${calibrationBrightness.toFixed(1)} = 100%`;
+        });
+
+        // История
+        function addHistoryRecord() {
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('ru-RU');
+            const dateStr = now.toLocaleDateString('ru-RU');
+            const threshold = parseFloat(thresholdInput.value) || 70;
+            const warning = currentTransparency < threshold ? '⚠️ WARNING' : '✅ Норма';
+            const div = document.createElement('div');
+            div.className = 'history-item';
+            div.innerHTML = `<span>${dateStr} ${timeStr}</span> <span>Прозр: ${currentTransparency.toFixed(1)}%</span> <span>${warning}</span>`;
+            historyList.prepend(div);
+        }
+
+        recordBtn.addEventListener('click', () => {
+            if (!stream) return;
+            addHistoryRecord();
+        });
+
+        clearHistoryBtn.addEventListener('click', () => {
+            historyList.innerHTML = '';
+        });
+
+        // Анализ кадра
+        function analyzeFrame() {
+            if (!stream || video.readyState < 2) {
+                animationId = requestAnimationFrame(analyzeFrame);
+                return;
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0);
+
+            let imageData;
+            if (analysisRegion) {
+                const rx = Math.max(0, Math.min(analysisRegion.x, canvas.width - 1));
+                const ry = Math.max(0, Math.min(analysisRegion.y, canvas.height - 1));
+                const rw = Math.max(1, Math.min(analysisRegion.width, canvas.width - rx));
+                const rh = Math.max(1, Math.min(analysisRegion.height, canvas.height - ry));
+                imageData = ctx.getImageData(rx, ry, rw, rh);
+            } else {
+                imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            }
+
+            const data = imageData.data;
+            let totalBrightness = 0;
+            const pixelCount = data.length / 4;
+            for (let i = 0; i < data.length; i += 4) {
+                totalBrightness += 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
+            }
+            currentBrightness = totalBrightness / pixelCount;
+
+            if (calibrationBrightness && calibrationBrightness > 0) {
+                currentTransparency = Math.min(100, (currentBrightness / calibrationBrightness) * 100);
+            } else {
+                currentTransparency = Math.min(100, (currentBrightness / 255) * 100);
+            }
+            currentTransparency = Math.max(0, currentTransparency);
+
+            transparencyEl.textContent = currentTransparency.toFixed(1) + '%';
+            brightnessEl.textContent = currentBrightness.toFixed(1);
+            indicatorEl.style.left = currentTransparency + '%';
+
+            const threshold = parseFloat(thresholdInput.value) || 70;
+            warningMsg.textContent = currentTransparency < threshold ? '⚠️ WARNING: Прозрачность ниже порога!' : '';
+
+            let quality = '';
+            if (currentTransparency > 90) quality = '💧 Очень прозрачная';
+            else if (currentTransparency > 70) quality = '💧 Прозрачная';
+            else if (currentTransparency > 50) quality = '🌫️ Средняя мутность';
+            else if (currentTransparency > 30) quality = '🌫️ Мутная';
+            else quality = '⬛ Очень мутная';
+            statusEl.textContent = quality;
+
+            addTrendPoint(currentTransparency);
+            if (dataChannel && dataChannel.readyState === 'open') {
+                dataChannel.send(JSON.stringify({ transparency: currentTransparency, brightness: currentBrightness }));
+            }
+
+            animationId = requestAnimationFrame(analyzeFrame);
+        }
+
+        function startAnalysis() {
+            if (animationId) cancelAnimationFrame(animationId);
+            analyzeFrame();
+        }
+
+        // PeerJS трансляция
         function initPeer() {
-            // Закрываем предыдущий экземпляр если есть
             if (peer) {
                 peer.destroy();
                 peer = null;
             }
-
-            // Можно использовать свой сигнальный сервер, если стандартный недоступен
-            // const customServer = { host: 'your-server.com', port: 9000, path: '/myapp' };
-            // peer = new Peer(undefined, { host: customServer.host, port: customServer.port, path: customServer.path });
-            
-            peer = new Peer(); // Используем сервер по умолчанию 0.peerjs.com
-
+            peer = new Peer();
             peer.on('open', (id) => {
                 myPeerIdSpan.textContent = id;
                 myPeerIdSpan.style.color = '#27ae60';
                 peerStatusSpan.textContent = '✅ Сервер PeerJS подключён, ваш ID готов';
-                console.log('Peer ID:', id);
             });
-
             peer.on('disconnected', () => {
                 peerStatusSpan.textContent = '⚠️ Соединение с сервером потеряно, переподключение...';
                 peer.reconnect();
             });
-
             peer.on('error', (err) => {
-                console.error('PeerJS error:', err);
                 myPeerIdSpan.textContent = 'Ошибка';
                 myPeerIdSpan.style.color = '#e74c3c';
-                if (err.type === 'unavailable-id') {
-                    peerStatusSpan.textContent = '❌ Этот ID уже используется. Попробуйте обновить страницу.';
-                } else if (err.type === 'network') {
-                    peerStatusSpan.textContent = '❌ Проблема сети или сервер недоступен. Проверьте интернет.';
-                } else if (err.type === 'server-error') {
-                    peerStatusSpan.textContent = '❌ Ошибка сервера PeerJS. Попробуйте позже или используйте другой сервер.';
-                } else {
-                    peerStatusSpan.textContent = '❌ Ошибка: ' + err.message;
-                }
+                if (err.type === 'unavailable-id') peerStatusSpan.textContent = '❌ Этот ID уже используется. Попробуйте обновить.';
+                else if (err.type === 'network') peerStatusSpan.textContent = '❌ Проблема сети или сервер недоступен.';
+                else if (err.type === 'server-error') peerStatusSpan.textContent = '❌ Ошибка сервера PeerJS.';
+                else peerStatusSpan.textContent = '❌ Ошибка: ' + err.message;
                 broadcastBtn.disabled = false;
                 broadcastBtn.textContent = '📡 Трансляция';
                 isBroadcasting = false;
             });
-
             peer.on('connection', (conn) => {
                 if (isBroadcasting) {
                     conn.on('open', () => {
-                        // Отправляем видео звонком
                         const call = peer.call(conn.peer, stream);
-                        call.on('stream', (remoteStream) => {
-                            // не требуется
-                        });
-                        call.on('error', (err) => {
-                            statusEl.textContent = '❌ Ошибка передачи видео: ' + err;
-                        });
-                        dataChannel = conn; // DataConnection для команд
-                        dataChannel.on('data', (data) => {
-                            // можем получать что-то от наблюдателя
-                        });
+                        call.on('error', (err) => statusEl.textContent = '❌ Ошибка передачи видео: ' + err);
+                        dataChannel = conn;
+                        dataChannel.on('data', () => {});
                         peerStatusSpan.textContent = '🔗 Наблюдатель подключён, идёт трансляция';
                     });
                 }
             });
-
             peer.on('call', (call) => {
                 if (!isBroadcasting && !isReceiving) {
-                    // Мы подключаемся к чужой трансляции? У нас уже есть connectBtn логика.
-                    // На всякий случай обработаем входящий звонок, если нас вызвали как наблюдателя.
-                    call.answer(); // без своего потока
+                    call.answer();
                     call.on('stream', (remoteStream) => {
                         video.srcObject = remoteStream;
                         isReceiving = true;
@@ -386,24 +608,15 @@
                         areaBtn.disabled = true;
                         calibrateBtn.disabled = true;
                         broadcastBtn.disabled = true;
-                        // ждём dataChannel от звонящего (обычно созванивающийся создаёт DataConnection отдельно)
-                    });
-                    call.on('error', (err) => {
-                        statusEl.textContent = '❌ Ошибка входящего звонка: ' + err;
                     });
                 }
             });
         }
 
-        // Кнопка "Трансляция"
         broadcastBtn.addEventListener('click', () => {
             if (isBroadcasting) {
-                // Отключаем трансляцию
                 if (dataChannel) dataChannel.close();
-                if (peer) {
-                    peer.destroy();
-                    peer = null;
-                }
+                if (peer) { peer.destroy(); peer = null; }
                 isBroadcasting = false;
                 broadcastBtn.textContent = '📡 Трансляция';
                 broadcastBtn.disabled = false;
@@ -412,29 +625,22 @@
                 statusEl.textContent = 'Трансляция остановлена.';
                 return;
             }
-            if (!stream) {
-                alert('Сначала включите камеру');
-                return;
-            }
+            if (!stream) return;
             initPeer();
             isBroadcasting = true;
             broadcastBtn.textContent = '⏹️ Остановить трансляцию';
-            broadcastBtn.disabled = false;
-            statusEl.textContent = 'Ожидание подключения... Передайте ваш ID другому устройству.';
             peerStatusSpan.textContent = '⏳ Подключение к серверу...';
+            statusEl.textContent = 'Ожидание подключения... Передайте ваш ID.';
         });
 
-        // Подключение к удалённому ID
         connectBtn.addEventListener('click', () => {
             const remoteId = remotePeerIdInput.value.trim();
             if (!remoteId) return;
             if (!peer) initPeer();
-
             remoteConnection = peer.connect(remoteId);
             remoteConnection.on('open', () => {
                 dataChannel = remoteConnection;
                 statusEl.textContent = '🔗 Data-канал открыт. Запрашиваем видео...';
-                // Запрашиваем видео
                 const call = peer.call(remoteId, stream);
                 call.on('stream', (remoteStream) => {
                     video.srcObject = remoteStream;
@@ -444,10 +650,7 @@
                     calibrateBtn.disabled = true;
                     broadcastBtn.disabled = true;
                 });
-                call.on('error', (err) => {
-                    statusEl.textContent = '❌ Ошибка видеозвонка: ' + err;
-                });
-                // Получаем данные
+                call.on('error', (err) => statusEl.textContent = '❌ Ошибка видеозвонка: ' + err);
                 remoteConnection.on('data', (data) => {
                     const parsed = JSON.parse(data);
                     currentTransparency = parsed.transparency;
@@ -462,18 +665,13 @@
                 connectBtn.style.display = 'none';
                 disconnectBtn.style.display = 'inline-block';
             });
-            remoteConnection.on('error', (err) => {
-                statusEl.textContent = '❌ Ошибка подключения: ' + err;
-            });
+            remoteConnection.on('error', (err) => statusEl.textContent = '❌ Ошибка подключения: ' + err);
         });
 
         disconnectBtn.addEventListener('click', () => {
             if (remoteConnection) remoteConnection.close();
             if (dataChannel) dataChannel.close();
-            if (peer) {
-                peer.destroy();
-                peer = null;
-            }
+            if (peer) { peer.destroy(); peer = null; }
             video.srcObject = stream;
             isReceiving = false;
             isBroadcasting = false;
@@ -491,8 +689,19 @@
             startAnalysis();
         });
 
-        // Остальной код (startAnalysis, выбор области и т.д.) без изменений
-        // ... (вставьте сюда полную реализацию функций, которые я пропустил)
+        // Запуск
+        window.addEventListener('load', () => {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                statusEl.textContent = '❌ Браузер не поддерживает камеру.';
+                return;
+            }
+            startCamera();
+        });
+
+        window.addEventListener('beforeunload', () => {
+            if (stream) stream.getTracks().forEach(track => track.stop());
+            if (peer) peer.destroy();
+        });
     </script>
 </body>
 </html>
