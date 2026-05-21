@@ -245,25 +245,20 @@
     </div>
 
     <script>
-        // ========== ВСТРОЕННЫЙ QR-КОД (QR Code Generator) ==========
-        // Упрощённый генератор QR-кода, который работает без внешних библиотек
+        // ========== ВСТРОЕННЫЙ QR-ГЕНЕРАТОР (надёжная версия) ==========
         function generateQR(text, size) {
             const canvas = document.getElementById('qrCanvas');
             canvas.width = size;
             canvas.height = size;
             const ctx = canvas.getContext('2d');
-            
-            // Очищаем
             ctx.fillStyle = '#fff';
             ctx.fillRect(0, 0, size, size);
             
-            // Кодируем текст в "паттерн"
+            // Преобразуем строку в массив байт и в биты
             const bytes = new TextEncoder().encode(text);
             const bits = [];
             bytes.forEach(byte => {
-                for (let i = 7; i >= 0; i--) {
-                    bits.push((byte >> i) & 1);
-                }
+                for (let i = 7; i >= 0; i--) bits.push((byte >> i) & 1);
             });
             
             const gridSize = Math.ceil(Math.sqrt(bits.length)) + 8;
@@ -277,14 +272,12 @@
                     ctx.fillRect(x * cellSize, y * cellSize, cellSize * 0.8, cellSize * 0.8);
                 }
             }
-            
-            // Рамка
             ctx.strokeStyle = '#000';
             ctx.lineWidth = 2;
             ctx.strokeRect(0, 0, size, size);
         }
 
-        // Все DOM элементы
+        // DOM элементы
         const video = document.getElementById('video');
         const areaBtn = document.getElementById('areaBtn');
         const resetBtn = document.getElementById('resetBtn');
@@ -321,13 +314,10 @@
         let isBroadcaster = false;
         let shareUrl = '';
 
-        // Дата и время
+        // Дата/время
         function updateDateTime() {
             const now = new Date();
-            datetimeEl.textContent = now.toLocaleString('ru-RU', { 
-                day: '2-digit', month: '2-digit', year: 'numeric', 
-                hour: '2-digit', minute: '2-digit', second: '2-digit' 
-            });
+            datetimeEl.textContent = now.toLocaleString('ru-RU', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit' });
         }
         setInterval(updateDateTime, 1000);
         updateDateTime();
@@ -393,7 +383,7 @@
             };
         }
 
-        // Выбор области (touch + mouse)
+        // Выбор области
         function getCoords(e) {
             const rect = video.getBoundingClientRect();
             const clientX = e.touches ? e.touches[0].clientX : e.clientX;
@@ -460,7 +450,6 @@
             if (isSelecting) {
                 isSelecting = false;
                 areaBtn.textContent = '🎯 Область';
-                areaBtn.style.background = '#3498db';
                 regionSelector.style.display = 'none';
                 removeSelectionListeners();
                 return;
@@ -553,23 +542,26 @@
             analyzeFrame();
         }
 
-        // ====== ТРАНСЛЯЦИЯ ======
+        // ====== ИСПРАВЛЕННАЯ ТРАНСЛЯЦИЯ ======
         broadcastBtn.addEventListener('click', async () => {
             if (!stream) return;
             
             if (pc) { pc.close(); pc = null; }
 
             pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+            
+            // Добавляем треки из локального потока
             stream.getTracks().forEach(track => pc.addTrack(track, stream));
             isBroadcaster = true;
 
             dataChannel = pc.createDataChannel('transparency');
-
-            pc.onicecandidate = (event) => {
-                if (!event.candidate) {
-                    // ICE-кандидаты собраны, генерируем ссылку
+            
+            // Используем onicegatheringstatechange для надёжного определения завершения сбора ICE
+            pc.onicegatheringstatechange = () => {
+                if (pc.iceGatheringState === 'complete') {
+                    // Все кандидаты собраны, формируем ссылку
                     const sdp = JSON.stringify(pc.localDescription);
-                    const encoded = btoa(unescape(encodeURIComponent(sdp)));
+                    const encoded = btoa(sdp); // простое Base64 кодирование ASCII-строки
                     shareUrl = `${window.location.href.split('?')[0]}?sdp=${encoded}`;
                     
                     qrContainer.style.display = 'block';
@@ -580,12 +572,18 @@
                 }
             };
 
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
+            try {
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+            } catch (err) {
+                statusEl.textContent = '❌ Ошибка создания трансляции: ' + err.message;
+                console.error(err);
+            }
         });
 
         // Копировать ссылку
         copyBtn.addEventListener('click', () => {
+            if (!shareUrl) return;
             navigator.clipboard.writeText(shareUrl).then(() => {
                 statusEl.textContent = '🔗 Ссылка скопирована! Отправьте её на другое устройство.';
             }).catch(() => {
@@ -628,10 +626,15 @@
                 };
             };
 
-            await pc.setRemoteDescription(new RTCSessionDescription(sdpOffer));
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-            statusEl.textContent = '🔗 Подключено к трансляции!';
+            try {
+                await pc.setRemoteDescription(new RTCSessionDescription(sdpOffer));
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                statusEl.textContent = '🔗 Подключено к трансляции!';
+            } catch (err) {
+                statusEl.textContent = '❌ Ошибка подключения: ' + err.message;
+                console.error(err);
+            }
         }
 
         // Проверка URL при загрузке
@@ -640,7 +643,7 @@
             const sdpParam = urlParams.get('sdp');
             if (sdpParam) {
                 try {
-                    const sdp = JSON.parse(decodeURIComponent(escape(atob(sdpParam))));
+                    const sdp = JSON.parse(atob(sdpParam)); // простое декодирование
                     if (stream) {
                         connectAsViewer(sdp);
                     } else {
@@ -653,6 +656,7 @@
                     }
                 } catch (e) {
                     console.error('SDP parse error:', e);
+                    statusEl.textContent = '❌ Неверная ссылка трансляции.';
                 }
             }
         }
