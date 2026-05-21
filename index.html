@@ -85,7 +85,6 @@
         button:disabled { background: #bdc3c7; transform: none; }
         .calibrate-btn { background: #27ae60; }
         .record-btn { background: #f39c12; }
-        .broadcast-btn { background: #8e44ad; }
         .threshold-row {
             display: flex;
             align-items: center;
@@ -160,7 +159,6 @@
             display: flex;
             justify-content: space-between;
         }
-        .history-item span { font-weight: 600; }
         .clear-history {
             font-size: 0.75rem;
             color: #e74c3c;
@@ -179,24 +177,16 @@
             border: 1px solid #ddd;
             margin-top: 10px;
         }
-        /* Ручной обмен SDP */
-        .sdp-block {
+        .room-block {
             margin: 10px 0;
-            text-align: left;
         }
-        .sdp-block textarea {
-            width: 100%;
-            height: 80px;
-            font-size: 0.7rem;
-            font-family: monospace;
-            resize: vertical;
-            margin: 5px 0;
-        }
-        .sdp-block button {
-            background: #8e44ad;
-            width: auto;
-            flex: none;
-            padding: 8px 15px;
+        .room-block input {
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid #ccc;
+            width: 60%;
+            font-size: 1rem;
+            text-align: center;
         }
     </style>
 </head>
@@ -210,12 +200,16 @@
             <div id="regionSelector" class="region-selector"></div>
         </div>
 
+        <div class="room-block">
+            <input type="text" id="roomInput" placeholder="Имя комнаты">
+            <button id="joinRoomBtn">🔗 Войти в комнату</button>
+        </div>
+
         <div class="controls">
             <button id="areaBtn" disabled>🎯 Область</button>
             <button id="resetBtn" disabled>🔄 Сброс</button>
             <button id="calibrateBtn" class="calibrate-btn" disabled>📏 Калибровать</button>
             <button id="recordBtn" class="record-btn" disabled>📝 Записать</button>
-            <button id="createOfferBtn" class="broadcast-btn" disabled>📡 Создать трансляцию</button>
         </div>
 
         <div class="threshold-row">
@@ -237,28 +231,6 @@
 
         <canvas id="trendCanvas" class="trend-canvas" width="500" height="150"></canvas>
 
-        <!-- Ручной обмен SDP -->
-        <div class="sdp-block" id="sdpOfferBlock">
-            <label>Ваш SDP (предложение):</label>
-            <textarea id="localSdp" readonly></textarea>
-            <button id="copyOfferBtn">📋 Копировать SDP</button>
-        </div>
-        <div class="sdp-block" id="sdpRemoteBlock">
-            <label>SDP от источника (вставьте сюда):</label>
-            <textarea id="remoteSdp" placeholder="Вставьте SDP предложение..."></textarea>
-            <button id="connectRemoteBtn">🔗 Подключиться (создать ответ)</button>
-        </div>
-        <div class="sdp-block" id="sdpAnswerBlock" style="display:none;">
-            <label>Ваш SDP ответа:</label>
-            <textarea id="localAnswerSdp" readonly></textarea>
-            <button id="copyAnswerBtn">📋 Копировать ответ</button>
-        </div>
-        <div class="sdp-block" id="sdpAcceptBlock" style="display:none;">
-            <label>SDP ответа от наблюдателя (вставьте сюда):</label>
-            <textarea id="remoteAnswerSdp" placeholder="Вставьте SDP ответ..."></textarea>
-            <button id="acceptAnswerBtn">✅ Принять ответ</button>
-        </div>
-
         <div class="history" id="historyContainer">
             <h3>📋 История измерений</h3>
             <div id="historyList"></div>
@@ -267,13 +239,18 @@
     </div>
 
     <script>
+        // ===== НАСТРОЙКА: замените на IP вашего сервера =====
+        const SIGNALING_SERVER_URL = 'ws://10.200.57.154:8080';
+        // ===================================================
+
         // DOM элементы
         const video = document.getElementById('video');
         const areaBtn = document.getElementById('areaBtn');
         const resetBtn = document.getElementById('resetBtn');
         const calibrateBtn = document.getElementById('calibrateBtn');
         const recordBtn = document.getElementById('recordBtn');
-        const createOfferBtn = document.getElementById('createOfferBtn');
+        const joinRoomBtn = document.getElementById('joinRoomBtn');
+        const roomInput = document.getElementById('roomInput');
         const transparencyEl = document.getElementById('transparencyValue');
         const brightnessEl = document.getElementById('brightnessValue');
         const indicatorEl = document.getElementById('indicator');
@@ -286,20 +263,6 @@
         const clearHistoryBtn = document.getElementById('clearHistoryBtn');
         const trendCanvas = document.getElementById('trendCanvas');
         const ctxTrend = trendCanvas.getContext('2d');
-        
-        // Элементы SDP
-        const localSdpTextarea = document.getElementById('localSdp');
-        const remoteSdpTextarea = document.getElementById('remoteSdp');
-        const copyOfferBtn = document.getElementById('copyOfferBtn');
-        const connectRemoteBtn = document.getElementById('connectRemoteBtn');
-        const localAnswerSdpTextarea = document.getElementById('localAnswerSdp');
-        const copyAnswerBtn = document.getElementById('copyAnswerBtn');
-        const remoteAnswerSdpTextarea = document.getElementById('remoteAnswerSdp');
-        const acceptAnswerBtn = document.getElementById('acceptAnswerBtn');
-        const sdpAnswerBlock = document.getElementById('sdpAnswerBlock');
-        const sdpAcceptBlock = document.getElementById('sdpAcceptBlock');
-        const sdpOfferBlock = document.getElementById('sdpOfferBlock');
-        const sdpRemoteBlock = document.getElementById('sdpRemoteBlock');
 
         let stream = null;
         let analysisRegion = null;
@@ -310,14 +273,13 @@
         let currentBrightness = 0;
         let trendData = [];
 
-        // WebRTC ручной обмен
-        let localPc = null;   // для создателя предложения (телефон)
-        let remotePc = null;  // для принимающего (компьютер)
+        // WebRTC и сигнализация
+        let ws = null;
+        let pc = null;
         let dataChannel = null;
-        let isBroadcasting = false;
-        let isReceiving = false;
+        let isBroadcaster = false;
 
-        // Дата и время
+        // Дата/время
         function updateDateTime() {
             const now = new Date();
             datetimeEl.textContent = now.toLocaleString('ru-RU', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit' });
@@ -329,10 +291,8 @@
         function drawTrend() {
             ctxTrend.clearRect(0, 0, trendCanvas.width, trendCanvas.height);
             if (trendData.length < 2) return;
-            const w = trendCanvas.width;
-            const h = trendCanvas.height;
-            const maxPoints = 30;
-            const points = trendData.slice(-maxPoints);
+            const w = trendCanvas.width, h = trendCanvas.height;
+            const points = trendData.slice(-30);
             const xStep = w / (points.length - 1);
             ctxTrend.beginPath();
             ctxTrend.strokeStyle = '#3498db';
@@ -361,7 +321,7 @@
             drawTrend();
         }
 
-        // Запуск камеры
+        // Камера
         async function startCamera() {
             try {
                 stream = await navigator.mediaDevices.getUserMedia({
@@ -379,12 +339,11 @@
             video.srcObject = stream;
             video.onloadedmetadata = () => {
                 video.play();
-                statusEl.textContent = '✅ Камера работает. Выберите область.';
+                statusEl.textContent = '✅ Камера готова. Введите имя комнаты.';
                 areaBtn.disabled = false;
                 calibrateBtn.disabled = false;
                 recordBtn.disabled = false;
-                createOfferBtn.disabled = false;
-                resetBtn.disabled = true;
+                joinRoomBtn.disabled = false;
                 startAnalysis();
             };
         }
@@ -438,7 +397,6 @@
             areaBtn.textContent = '🎯 Область';
             areaBtn.style.background = '#3498db';
             resetBtn.disabled = false;
-            statusEl.textContent = '✅ Область выбрана.';
             removeSelectionListeners();
         }
         function addSelectionListeners() {
@@ -477,7 +435,6 @@
             analysisRegion = null;
             regionSelector.style.display = 'none';
             resetBtn.disabled = true;
-            statusEl.textContent = '🔄 Область сброшена.';
         });
 
         // Калибровка
@@ -544,8 +501,7 @@
 
             addTrendPoint(currentTransparency);
 
-            // Отправка данных через DataChannel (если открыт)
-            if (dataChannel && dataChannel.readyState === 'open') {
+            if (dataChannel && dataChannel.readyState === 'open' && isBroadcaster) {
                 dataChannel.send(JSON.stringify({ transparency: currentTransparency, brightness: currentBrightness }));
             }
 
@@ -557,66 +513,55 @@
             analyzeFrame();
         }
 
-        // ========== РУЧНОЙ ОБМЕН SDP ==========
+        // Сигнализация
+        joinRoomBtn.addEventListener('click', () => {
+            const room = roomInput.value.trim();
+            if (!room) return alert('Введите имя комнаты');
+            if (!stream) return alert('Камера ещё не готова');
 
-        // Создание предложения (телефон)
-        async function createOffer() {
-            localPc = new RTCPeerConnection({ iceTransportPolicy: 'all' });
-            stream.getTracks().forEach(track => localPc.addTrack(track, stream));
-            
-            // DataChannel для данных
-            dataChannel = localPc.createDataChannel('transparency');
-            dataChannel.onopen = () => statusEl.textContent = 'Канал данных открыт, передача прозрачности...';
-            dataChannel.onclose = () => statusEl.textContent = 'Канал данных закрыт';
+            if (ws) ws.close();
+            if (pc) pc.close();
 
-            localPc.onicecandidate = (e) => {
-                if (!e.candidate) {
-                    // Сбор ICE завершён, показываем полный SDP
-                    localSdpTextarea.value = JSON.stringify(localPc.localDescription);
+            ws = new WebSocket(SIGNALING_SERVER_URL);
+            ws.onopen = () => {
+                statusEl.textContent = 'Подключились к серверу...';
+                ws.send(JSON.stringify({ type: 'join', room }));
+            };
+
+            ws.onmessage = async (event) => {
+                const msg = JSON.parse(event.data);
+                if (msg.type === 'ready') {
+                    createRTCPeerConnection();
+                } else if (msg.type === 'offer') {
+                    await handleOffer(msg);
+                } else if (msg.type === 'answer') {
+                    await handleAnswer(msg);
+                } else if (msg.type === 'ice-candidate') {
+                    await handleIceCandidate(msg);
                 }
             };
 
-            const offer = await localPc.createOffer();
-            await localPc.setLocalDescription(offer);
-            // ICE кандидаты соберутся, после этого в поле появится SDP
-            sdpOfferBlock.style.display = 'block';
-            sdpAcceptBlock.style.display = 'block'; // показываем поле для ответа
-            statusEl.textContent = 'Скопируйте SDP предложения и передайте на другое устройство.';
-            createOfferBtn.disabled = true;
-        }
+            ws.onerror = () => statusEl.textContent = '❌ Ошибка WebSocket. Проверьте сервер.';
+            ws.onclose = () => statusEl.textContent = 'Соединение с сервером закрыто.';
+        });
 
-        // Принятие ответа на телефоне
-        async function acceptAnswer() {
-            const answerStr = remoteAnswerSdpTextarea.value.trim();
-            if (!answerStr || !localPc) return alert('Вставьте SDP ответа');
-            try {
-                const answerDesc = JSON.parse(answerStr);
-                await localPc.setRemoteDescription(new RTCSessionDescription(answerDesc));
-                statusEl.textContent = 'Соединение установлено! Трансляция идёт.';
-                isBroadcasting = true;
-            } catch (e) {
-                alert('Ошибка принятия ответа: ' + e.message);
-            }
-        }
+        function createRTCPeerConnection() {
+            pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+            stream.getTracks().forEach(track => pc.addTrack(track, stream));
+            isBroadcaster = true;
 
-        // Подключение к предложению (компьютер)
-        async function connectToRemote() {
-            const offerStr = remoteSdpTextarea.value.trim();
-            if (!offerStr) return alert('Вставьте SDP предложение от источника');
-            
-            remotePc = new RTCPeerConnection();
-            remotePc.ontrack = (event) => {
+            dataChannel = pc.createDataChannel('transparency');
+
+            pc.ontrack = (event) => {
                 video.srcObject = event.streams[0];
-                isReceiving = true;
-                statusEl.textContent = 'Видео получено!';
                 areaBtn.disabled = true;
                 calibrateBtn.disabled = true;
-                createOfferBtn.disabled = true;
+                statusEl.textContent = '📡 Видео получено';
             };
 
-            remotePc.ondatachannel = (event) => {
-                const receiveChannel = event.channel;
-                receiveChannel.onmessage = (e) => {
+            pc.ondatachannel = (event) => {
+                const channel = event.channel;
+                channel.onmessage = (e) => {
                     const data = JSON.parse(e.data);
                     currentTransparency = data.transparency;
                     currentBrightness = data.brightness;
@@ -629,39 +574,63 @@
                 };
             };
 
-            remotePc.onicecandidate = (e) => {
-                if (!e.candidate) {
-                    localAnswerSdpTextarea.value = JSON.stringify(remotePc.localDescription);
-                    sdpAnswerBlock.style.display = 'block';
-                    statusEl.textContent = 'Скопируйте SDP ответа и отправьте обратно источнику.';
+            pc.onicecandidate = (event) => {
+                if (event.candidate) {
+                    ws.send(JSON.stringify({ type: 'ice-candidate', candidate: event.candidate }));
                 }
             };
 
-            try {
-                const offerDesc = JSON.parse(offerStr);
-                await remotePc.setRemoteDescription(new RTCSessionDescription(offerDesc));
-                const answer = await remotePc.createAnswer();
-                await remotePc.setLocalDescription(answer);
-            } catch (e) {
-                alert('Ошибка подключения: ' + e.message);
+            pc.createOffer().then(offer => pc.setLocalDescription(offer)).then(() => {
+                ws.send(JSON.stringify({ type: 'offer', sdp: pc.localDescription }));
+                statusEl.textContent = '📡 Ожидание подключения наблюдателя...';
+            });
+        }
+
+        async function handleOffer(msg) {
+            if (!pc) {
+                pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+                pc.ontrack = (event) => {
+                    video.srcObject = event.streams[0];
+                    areaBtn.disabled = true;
+                    calibrateBtn.disabled = true;
+                    statusEl.textContent = '📡 Видео получено';
+                };
+                pc.ondatachannel = (event) => {
+                    const channel = event.channel;
+                    channel.onmessage = (e) => {
+                        const data = JSON.parse(e.data);
+                        currentTransparency = data.transparency;
+                        currentBrightness = data.brightness;
+                        transparencyEl.textContent = currentTransparency.toFixed(1) + '%';
+                        brightnessEl.textContent = currentBrightness.toFixed(1);
+                        indicatorEl.style.left = currentTransparency + '%';
+                        addTrendPoint(currentTransparency);
+                        const threshold = parseFloat(thresholdInput.value) || 70;
+                        warningMsg.textContent = currentTransparency < threshold ? '⚠️ WARNING: Прозрачность ниже порога!' : '';
+                    };
+                };
+                pc.onicecandidate = (event) => {
+                    if (event.candidate) ws.send(JSON.stringify({ type: 'ice-candidate', candidate: event.candidate }));
+                };
             }
+            await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            ws.send(JSON.stringify({ type: 'answer', sdp: pc.localDescription }));
         }
 
-        // Копирование SDP
-        function copyToClipboard(textarea) {
-            textarea.select();
-            document.execCommand('copy');
-            alert('Скопировано в буфер обмена');
+        async function handleAnswer(msg) {
+            if (!pc) return;
+            await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+            statusEl.textContent = '✅ Соединение установлено! Идёт трансляция.';
         }
 
-        // Назначение обработчиков
-        createOfferBtn.addEventListener('click', createOffer);
-        acceptAnswerBtn.addEventListener('click', acceptAnswer);
-        connectRemoteBtn.addEventListener('click', connectToRemote);
-        copyOfferBtn.addEventListener('click', () => copyToClipboard(localSdpTextarea));
-        copyAnswerBtn.addEventListener('click', () => copyToClipboard(localAnswerSdpTextarea));
+        async function handleIceCandidate(msg) {
+            if (!pc) return;
+            try { await pc.addIceCandidate(new RTCIceCandidate(msg.candidate)); } catch (e) {}
+        }
 
-        // Запуск приложения
+        // Запуск
         window.addEventListener('load', () => {
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
                 statusEl.textContent = '❌ Браузер не поддерживает камеру.';
@@ -672,8 +641,8 @@
 
         window.addEventListener('beforeunload', () => {
             if (stream) stream.getTracks().forEach(track => track.stop());
-            if (localPc) localPc.close();
-            if (remotePc) remotePc.close();
+            if (ws) ws.close();
+            if (pc) pc.close();
         });
     </script>
 </body>
