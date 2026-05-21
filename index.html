@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>Прозрачность жидкости</title>
+    <!-- <script src="https://unpkg.com/peerjs@1.5.1/dist/peerjs.min.js"></script> -->
+<script src="https://unpkg.com/trystero@0.20.1/dist/trystero.min.js"></script>
     <script src="https://unpkg.com/peerjs@1.5.1/dist/peerjs.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -561,147 +563,56 @@
         }
 
         // PeerJS трансляция
-        function initPeer() {
-            if (peer) {
-                peer.destroy();
-                peer = null;
-            }
-            peer = new Peer();
-            peer.on('open', (id) => {
-                myPeerIdSpan.textContent = id;
-                myPeerIdSpan.style.color = '#27ae60';
-                peerStatusSpan.textContent = '✅ Сервер PeerJS подключён, ваш ID готов';
-            });
-            peer.on('disconnected', () => {
-                peerStatusSpan.textContent = '⚠️ Соединение с сервером потеряно, переподключение...';
-                peer.reconnect();
-            });
-            peer.on('error', (err) => {
-                myPeerIdSpan.textContent = 'Ошибка';
-                myPeerIdSpan.style.color = '#e74c3c';
-                if (err.type === 'unavailable-id') peerStatusSpan.textContent = '❌ Этот ID уже используется. Попробуйте обновить.';
-                else if (err.type === 'network') peerStatusSpan.textContent = '❌ Проблема сети или сервер недоступен.';
-                else if (err.type === 'server-error') peerStatusSpan.textContent = '❌ Ошибка сервера PeerJS.';
-                else peerStatusSpan.textContent = '❌ Ошибка: ' + err.message;
-                broadcastBtn.disabled = false;
-                broadcastBtn.textContent = '📡 Трансляция';
-                isBroadcasting = false;
-            });
-            peer.on('connection', (conn) => {
-                if (isBroadcasting) {
-                    conn.on('open', () => {
-                        const call = peer.call(conn.peer, stream);
-                        call.on('error', (err) => statusEl.textContent = '❌ Ошибка передачи видео: ' + err);
-                        dataChannel = conn;
-                        dataChannel.on('data', () => {});
-                        peerStatusSpan.textContent = '🔗 Наблюдатель подключён, идёт трансляция';
-                    });
-                }
-            });
-            peer.on('call', (call) => {
-                if (!isBroadcasting && !isReceiving) {
-                    call.answer();
-                    call.on('stream', (remoteStream) => {
-                        video.srcObject = remoteStream;
-                        isReceiving = true;
-                        statusEl.textContent = '📡 Получен удалённый видеопоток';
-                        areaBtn.disabled = true;
-                        calibrateBtn.disabled = true;
-                        broadcastBtn.disabled = true;
-                    });
-                }
-            });
+       // Замените ваш текущий код для PeerJS на этот
+let room; // Объект комнаты Trystero
+const ROOM_NAME = 'my-transparency-checker-room'; // Общее имя комнаты
+
+// ... ваш остальной код (DOM-элементы, stream, analyzeFrame и т.д.) ...
+
+// --- Функции для Trystero ---
+function initBroadcast() {
+    // Используем стратегию BitTorrent (не требует серверов)
+    room = trystero.joinRoom({ appId: ROOM_NAME }, 'torrent');
+
+    // Когда другое устройство заходит в комнату, отправляем ему наше видео
+    room.onPeerJoin((peerId) => {
+        console.log('Новый участник в комнате:', peerId);
+        if (stream) {
+            // Отправляем наш видеопоток
+            room.addStream(stream, peerId);
+            // Начинаем отправлять данные о прозрачности
+            if (dataChannel) clearInterval(dataChannel);
+            dataChannel = setInterval(() => {
+                room.send({ transparency: currentTransparency, brightness: currentBrightness }, peerId);
+            }, 500);
         }
+    });
 
-        broadcastBtn.addEventListener('click', () => {
-            if (isBroadcasting) {
-                if (dataChannel) dataChannel.close();
-                if (peer) { peer.destroy(); peer = null; }
-                isBroadcasting = false;
-                broadcastBtn.textContent = '📡 Трансляция';
-                broadcastBtn.disabled = false;
-                myPeerIdSpan.textContent = '—';
-                peerStatusSpan.textContent = 'Сервер PeerJS не подключён';
-                statusEl.textContent = 'Трансляция остановлена.';
-                return;
-            }
-            if (!stream) return;
-            initPeer();
-            isBroadcasting = true;
-            broadcastBtn.textContent = '⏹️ Остановить трансляцию';
-            peerStatusSpan.textContent = '⏳ Подключение к серверу...';
-            statusEl.textContent = 'Ожидание подключения... Передайте ваш ID.';
-        });
+    // Принимаем видеопоток от другого устройства
+    room.onPeerStream((stream, peerId) => {
+        console.log('Получен поток от:', peerId);
+        video.srcObject = stream;
+        isReceiving = true;
+        areaBtn.disabled = true;
+        calibrateBtn.disabled = true;
+        broadcastBtn.disabled = true;
+    });
 
-        connectBtn.addEventListener('click', () => {
-            const remoteId = remotePeerIdInput.value.trim();
-            if (!remoteId) return;
-            if (!peer) initPeer();
-            remoteConnection = peer.connect(remoteId);
-            remoteConnection.on('open', () => {
-                dataChannel = remoteConnection;
-                statusEl.textContent = '🔗 Data-канал открыт. Запрашиваем видео...';
-                const call = peer.call(remoteId, stream);
-                call.on('stream', (remoteStream) => {
-                    video.srcObject = remoteStream;
-                    isReceiving = true;
-                    statusEl.textContent = '📡 Видео получено';
-                    areaBtn.disabled = true;
-                    calibrateBtn.disabled = true;
-                    broadcastBtn.disabled = true;
-                });
-                call.on('error', (err) => statusEl.textContent = '❌ Ошибка видеозвонка: ' + err);
-                remoteConnection.on('data', (data) => {
-                    const parsed = JSON.parse(data);
-                    currentTransparency = parsed.transparency;
-                    currentBrightness = parsed.brightness;
-                    transparencyEl.textContent = currentTransparency.toFixed(1) + '%';
-                    brightnessEl.textContent = currentBrightness.toFixed(1);
-                    indicatorEl.style.left = currentTransparency + '%';
-                    addTrendPoint(currentTransparency);
-                    const threshold = parseFloat(thresholdInput.value) || 70;
-                    warningMsg.textContent = currentTransparency < threshold ? '⚠️ WARNING: Прозрачность ниже порога!' : '';
-                });
-                connectBtn.style.display = 'none';
-                disconnectBtn.style.display = 'inline-block';
-            });
-            remoteConnection.on('error', (err) => statusEl.textContent = '❌ Ошибка подключения: ' + err);
-        });
+    // Принимаем данные о прозрачности
+    room.onPeerData((data, peerId) => {
+        currentTransparency = data.transparency;
+        currentBrightness = data.brightness;
+        // ... обновление UI ...
+    });
+}
 
-        disconnectBtn.addEventListener('click', () => {
-            if (remoteConnection) remoteConnection.close();
-            if (dataChannel) dataChannel.close();
-            if (peer) { peer.destroy(); peer = null; }
-            video.srcObject = stream;
-            isReceiving = false;
-            isBroadcasting = false;
-            broadcastBtn.disabled = false;
-            broadcastBtn.textContent = '📡 Трансляция';
-            connectBtn.style.display = 'inline-block';
-            disconnectBtn.style.display = 'none';
-            dataChannel = null;
-            remoteConnection = null;
-            myPeerIdSpan.textContent = '—';
-            peerStatusSpan.textContent = 'Сервер PeerJS не подключён';
-            areaBtn.disabled = false;
-            calibrateBtn.disabled = false;
-            statusEl.textContent = '🔌 Отключено. Используется локальная камера.';
-            startAnalysis();
-        });
+function startBroadcast() {
+    if (!room) initBroadcast();
+    isBroadcasting = true;
+    // ... обновление кнопок и статуса ...
+}
 
-        // Запуск
-        window.addEventListener('load', () => {
-            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                statusEl.textContent = '❌ Браузер не поддерживает камеру.';
-                return;
-            }
-            startCamera();
-        });
-
-        window.addEventListener('beforeunload', () => {
-            if (stream) stream.getTracks().forEach(track => track.stop());
-            if (peer) peer.destroy();
-        });
+// ... остальные функции ...
     </script>
 </body>
 </html>
