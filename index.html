@@ -85,6 +85,7 @@
         button:disabled { background: #bdc3c7; transform: none; }
         .calibrate-btn { background: #27ae60; }
         .record-btn { background: #f39c12; }
+        .broadcast-btn { background: #8e44ad; }
         .threshold-row {
             display: flex;
             align-items: center;
@@ -179,6 +180,10 @@
         }
         .room-block {
             margin: 10px 0;
+            display: flex;
+            gap: 8px;
+            justify-content: center;
+            flex-wrap: wrap;
         }
         .room-block input {
             padding: 10px;
@@ -187,6 +192,11 @@
             width: 60%;
             font-size: 1rem;
             text-align: center;
+        }
+        .status-text {
+            font-size: 0.85rem;
+            color: #555;
+            margin: 5px 0;
         }
     </style>
 </head>
@@ -202,8 +212,11 @@
 
         <div class="room-block">
             <input type="text" id="roomInput" placeholder="Имя комнаты">
-            <button id="joinRoomBtn">🔗 Войти в комнату</button>
+            <button id="createRoomBtn" class="broadcast-btn" disabled>📡 Создать трансляцию</button>
+            <button id="joinRoomBtn" disabled>🔗 Подключиться</button>
         </div>
+
+        <div class="status-text" id="connectionStatus"></div>
 
         <div class="controls">
             <button id="areaBtn" disabled>🎯 Область</button>
@@ -239,22 +252,20 @@
     </div>
 
     <script>
-        // ===== НАСТРОЙКА: замените на IP вашего сервера =====
-        const SIGNALING_SERVER_URL = 'ws://10.200.57.154:8080';
-        // ===================================================
-
         // DOM элементы
         const video = document.getElementById('video');
         const areaBtn = document.getElementById('areaBtn');
         const resetBtn = document.getElementById('resetBtn');
         const calibrateBtn = document.getElementById('calibrateBtn');
         const recordBtn = document.getElementById('recordBtn');
+        const createRoomBtn = document.getElementById('createRoomBtn');
         const joinRoomBtn = document.getElementById('joinRoomBtn');
         const roomInput = document.getElementById('roomInput');
         const transparencyEl = document.getElementById('transparencyValue');
         const brightnessEl = document.getElementById('brightnessValue');
         const indicatorEl = document.getElementById('indicator');
         const statusEl = document.getElementById('statusText');
+        const connectionStatus = document.getElementById('connectionStatus');
         const regionSelector = document.getElementById('regionSelector');
         const thresholdInput = document.getElementById('threshold');
         const warningMsg = document.getElementById('warningMessage');
@@ -273,11 +284,11 @@
         let currentBrightness = 0;
         let trendData = [];
 
-        // WebRTC и сигнализация
-        let ws = null;
+        // WebRTC вручную (без сервера)
         let pc = null;
         let dataChannel = null;
         let isBroadcaster = false;
+        let isViewer = false;
 
         // Дата/время
         function updateDateTime() {
@@ -339,10 +350,11 @@
             video.srcObject = stream;
             video.onloadedmetadata = () => {
                 video.play();
-                statusEl.textContent = '✅ Камера готова. Введите имя комнаты.';
+                statusEl.textContent = '✅ Камера готова. Вы можете создать трансляцию или подключиться.';
                 areaBtn.disabled = false;
                 calibrateBtn.disabled = false;
                 recordBtn.disabled = false;
+                createRoomBtn.disabled = false;
                 joinRoomBtn.disabled = false;
                 startAnalysis();
             };
@@ -353,12 +365,7 @@
             const rect = video.getBoundingClientRect();
             const clientX = e.touches ? e.touches[0].clientX : e.clientX;
             const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-            return {
-                x: clientX - rect.left,
-                y: clientY - rect.top,
-                rectWidth: rect.width,
-                rectHeight: rect.height
-            };
+            return { x: clientX - rect.left, y: clientY - rect.top, rectWidth: rect.width, rectHeight: rect.height };
         }
         let startX, startY;
         function onPointerDown(e) {
@@ -435,16 +442,15 @@
             analysisRegion = null;
             regionSelector.style.display = 'none';
             resetBtn.disabled = true;
+            statusEl.textContent = '🔄 Область сброшена.';
         });
 
-        // Калибровка
         calibrateBtn.addEventListener('click', () => {
             if (!stream) return;
             calibrationBrightness = currentBrightness;
             statusEl.textContent = `📏 Калибровка: ${calibrationBrightness.toFixed(1)} = 100%`;
         });
 
-        // История
         function addHistoryRecord() {
             const now = new Date();
             const threshold = parseFloat(thresholdInput.value) || 70;
@@ -513,50 +519,69 @@
             analyzeFrame();
         }
 
-        // Сигнализация
-        joinRoomBtn.addEventListener('click', () => {
+        // ====== СОЗДАНИЕ ТРАНСЛЯЦИИ (ВЕЩАТЕЛЬ) ======
+        createRoomBtn.addEventListener('click', () => {
             const room = roomInput.value.trim();
             if (!room) return alert('Введите имя комнаты');
             if (!stream) return alert('Камера ещё не готова');
 
-            if (ws) ws.close();
-            if (pc) pc.close();
+            if (pc) { pc.close(); pc = null; }
 
-            ws = new WebSocket(SIGNALING_SERVER_URL);
-            ws.onopen = () => {
-                statusEl.textContent = 'Подключились к серверу...';
-                ws.send(JSON.stringify({ type: 'join', room }));
-            };
-
-            ws.onmessage = async (event) => {
-                const msg = JSON.parse(event.data);
-                if (msg.type === 'ready') {
-                    createRTCPeerConnection();
-                } else if (msg.type === 'offer') {
-                    await handleOffer(msg);
-                } else if (msg.type === 'answer') {
-                    await handleAnswer(msg);
-                } else if (msg.type === 'ice-candidate') {
-                    await handleIceCandidate(msg);
-                }
-            };
-
-            ws.onerror = () => statusEl.textContent = '❌ Ошибка WebSocket. Проверьте сервер.';
-            ws.onclose = () => statusEl.textContent = 'Соединение с сервером закрыто.';
-        });
-
-        function createRTCPeerConnection() {
             pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
             stream.getTracks().forEach(track => pc.addTrack(track, stream));
             isBroadcaster = true;
+            isViewer = false;
 
             dataChannel = pc.createDataChannel('transparency');
+            dataChannel.onopen = () => console.log('DataChannel opened (broadcaster)');
+            dataChannel.onclose = () => console.log('DataChannel closed');
+
+            pc.ontrack = () => {};
+            pc.ondatachannel = () => {};
+
+            pc.onicecandidate = (event) => {
+                if (!event.candidate) {
+                    // Сбор ICE завершён, показываем полный SDP
+                    const offer = pc.localDescription;
+                    const roomState = JSON.parse(localStorage.getItem('room_' + room) || '{}');
+                    roomState.offer = offer;
+                    roomState.time = Date.now();
+                    localStorage.setItem('room_' + room, JSON.stringify(roomState));
+                    connectionStatus.textContent = '📡 Трансляция создана! Ожидание подключения... (SDP сохранён локально)';
+                    statusEl.textContent = 'Трансляция активна. На втором устройстве введите ту же комнату и нажмите «Подключиться».';
+                }
+            };
+
+            pc.createOffer().then(offer => pc.setLocalDescription(offer));
+        });
+
+        // ====== ПОДКЛЮЧЕНИЕ К ТРАНСЛЯЦИИ (НАБЛЮДАТЕЛЬ) ======
+        joinRoomBtn.addEventListener('click', async () => {
+            const room = roomInput.value.trim();
+            if (!room) return alert('Введите имя комнаты');
+
+            // Загружаем SDP из localStorage
+            const roomState = JSON.parse(localStorage.getItem('room_' + room) || '{}');
+            if (!roomState.offer) {
+                return alert('Трансляция с таким именем не найдена. Сначала создайте её на устройстве-вещателе.');
+            }
+
+            // Проверяем, не устарело ли предложение (2 минуты)
+            if (Date.now() - roomState.time > 120000) {
+                return alert('Трансляция устарела. Обновите создание комнаты на вещателе.');
+            }
+
+            if (pc) { pc.close(); pc = null; }
+
+            pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+            isBroadcaster = false;
+            isViewer = true;
 
             pc.ontrack = (event) => {
                 video.srcObject = event.streams[0];
+                statusEl.textContent = '📡 Видео получено!';
                 areaBtn.disabled = true;
                 calibrateBtn.disabled = true;
-                statusEl.textContent = '📡 Видео получено';
             };
 
             pc.ondatachannel = (event) => {
@@ -575,60 +600,67 @@
             };
 
             pc.onicecandidate = (event) => {
-                if (event.candidate) {
-                    ws.send(JSON.stringify({ type: 'ice-candidate', candidate: event.candidate }));
+                if (!event.candidate) {
+                    const answer = pc.localDescription;
+                    const updatedState = roomState;
+                    updatedState.answer = answer;
+                    updatedState.time = Date.now();
+                    localStorage.setItem('room_' + room, JSON.stringify(updatedState));
+                    connectionStatus.textContent = '📡 Ответ сформирован. Завершаем подключение...';
                 }
             };
 
-            pc.createOffer().then(offer => pc.setLocalDescription(offer)).then(() => {
-                ws.send(JSON.stringify({ type: 'offer', sdp: pc.localDescription }));
-                statusEl.textContent = '📡 Ожидание подключения наблюдателя...';
-            });
-        }
-
-        async function handleOffer(msg) {
-            if (!pc) {
-                pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
-                pc.ontrack = (event) => {
-                    video.srcObject = event.streams[0];
-                    areaBtn.disabled = true;
-                    calibrateBtn.disabled = true;
-                    statusEl.textContent = '📡 Видео получено';
-                };
-                pc.ondatachannel = (event) => {
-                    const channel = event.channel;
-                    channel.onmessage = (e) => {
-                        const data = JSON.parse(e.data);
-                        currentTransparency = data.transparency;
-                        currentBrightness = data.brightness;
-                        transparencyEl.textContent = currentTransparency.toFixed(1) + '%';
-                        brightnessEl.textContent = currentBrightness.toFixed(1);
-                        indicatorEl.style.left = currentTransparency + '%';
-                        addTrendPoint(currentTransparency);
-                        const threshold = parseFloat(thresholdInput.value) || 70;
-                        warningMsg.textContent = currentTransparency < threshold ? '⚠️ WARNING: Прозрачность ниже порога!' : '';
-                    };
-                };
-                pc.onicecandidate = (event) => {
-                    if (event.candidate) ws.send(JSON.stringify({ type: 'ice-candidate', candidate: event.candidate }));
-                };
+            try {
+                await pc.setRemoteDescription(new RTCSessionDescription(roomState.offer));
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+            } catch (e) {
+                alert('Ошибка подключения: ' + e.message);
+                return;
             }
-            await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-            ws.send(JSON.stringify({ type: 'answer', sdp: pc.localDescription }));
-        }
 
-        async function handleAnswer(msg) {
-            if (!pc) return;
-            await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
-            statusEl.textContent = '✅ Соединение установлено! Идёт трансляция.';
-        }
+            // Через секунду проверяем, появился ли ответ от вещателя
+            setTimeout(async () => {
+                const updatedState = JSON.parse(localStorage.getItem('room_' + room) || '{}');
+                if (!updatedState.answer) {
+                    connectionStatus.textContent = '⏳ Ожидание ответа...';
+                    return;
+                }
+                // Вещатель должен прочитать answer из localStorage
+                // На вещателе запускаем обработчик
+                if (isBroadcaster) {
+                    try {
+                        await pc.setRemoteDescription(new RTCSessionDescription(updatedState.answer));
+                        statusEl.textContent = '✅ Соединение установлено! Идёт трансляция.';
+                        connectionStatus.textContent = '🔗 Наблюдатель подключён';
+                    } catch (e) {
+                        console.error('Ошибка принятия ответа:', e);
+                    }
+                }
+            }, 2000);
 
-        async function handleIceCandidate(msg) {
-            if (!pc) return;
-            try { await pc.addIceCandidate(new RTCIceCandidate(msg.candidate)); } catch (e) {}
-        }
+            statusEl.textContent = 'Подключаюсь к трансляции...';
+            connectionStatus.textContent = '⏳ Устанавливаю соединение...';
+        });
+
+        // Автоподхват ответа вещателем
+        setInterval(() => {
+            const room = roomInput.value.trim();
+            if (!room || !isBroadcaster || !pc) return;
+            const roomState = JSON.parse(localStorage.getItem('room_' + room) || '{}');
+            if (roomState.answer && pc.signalingState !== 'stable') {
+                pc.setRemoteDescription(new RTCSessionDescription(roomState.answer))
+                    .then(() => {
+                        statusEl.textContent = '✅ Соединение установлено! Идёт трансляция.';
+                        connectionStatus.textContent = '🔗 Наблюдатель подключён';
+                        // Очищаем, чтобы не повторять
+                        const state = roomState;
+                        delete state.answer;
+                        localStorage.setItem('room_' + room, JSON.stringify(state));
+                    })
+                    .catch((e) => console.error('Auto-answer error:', e));
+            }
+        }, 3000);
 
         // Запуск
         window.addEventListener('load', () => {
@@ -641,7 +673,6 @@
 
         window.addEventListener('beforeunload', () => {
             if (stream) stream.getTracks().forEach(track => track.stop());
-            if (ws) ws.close();
             if (pc) pc.close();
         });
     </script>
