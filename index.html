@@ -179,27 +179,12 @@
             border: 1px solid #ddd;
             margin-top: 10px;
         }
-        .qr-section {
-            margin: 15px 0;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-        }
-        .qr-section canvas {
-            border: 5px solid white;
-            border-radius: 10px;
-        }
-        .sdp-section {
+        #qrSection {
             margin: 10px 0;
-            text-align: left;
         }
-        .sdp-section textarea {
-            width: 100%;
-            height: 70px;
-            font-size: 0.65rem;
-            font-family: monospace;
-            margin: 5px 0;
-            resize: vertical;
+        #qrSection canvas {
+            border: 3px solid #fff;
+            border-radius: 8px;
         }
     </style>
 </head>
@@ -218,7 +203,7 @@
             <button id="resetBtn" disabled>🔄 Сброс</button>
             <button id="calibrateBtn" class="calibrate-btn" disabled>📏 Калибровать</button>
             <button id="recordBtn" class="record-btn" disabled>📝 Записать</button>
-            <button id="broadcastBtn" class="broadcast-btn" disabled>📡 Создать трансляцию</button>
+            <button id="broadcastBtn" class="broadcast-btn" disabled>📡 Трансляция</button>
         </div>
 
         <div class="threshold-row">
@@ -238,18 +223,8 @@
             <div id="statusText">Загрузка камеры...</div>
         </div>
 
-        <!-- QR-код для подключения -->
-        <div class="qr-section" id="qrSection" style="display:none;">
-            <h4>📱 Отсканируйте QR-код на втором устройстве:</h4>
-            <canvas id="qrCanvas" width="200" height="200"></canvas>
-        </div>
-
-        <!-- Ручной ввод SDP -->
-        <div class="sdp-section" id="sdpSection" style="display:none;">
-            <h4>Или вставьте SDP вручную:</h4>
-            <textarea id="remoteSdpInput" placeholder="Вставьте SDP предложение..."></textarea>
-            <button id="connectSdpBtn">🔗 Подключиться</button>
-        </div>
+        <canvas id="trendCanvas" class="trend-canvas" width="500" height="150"></canvas>
+        <div id="qrSection" style="display:none;"></div>
 
         <div class="history" id="historyContainer">
             <h3>📋 История измерений</h3>
@@ -259,7 +234,7 @@
     </div>
 
     <script>
-        // DOM элементы
+        // Все DOM элементы объявляем здесь
         const video = document.getElementById('video');
         const areaBtn = document.getElementById('areaBtn');
         const resetBtn = document.getElementById('resetBtn');
@@ -279,10 +254,6 @@
         const trendCanvas = document.getElementById('trendCanvas');
         const ctxTrend = trendCanvas.getContext('2d');
         const qrSection = document.getElementById('qrSection');
-        const qrCanvas = document.getElementById('qrCanvas');
-        const sdpSection = document.getElementById('sdpSection');
-        const remoteSdpInput = document.getElementById('remoteSdpInput');
-        const connectSdpBtn = document.getElementById('connectSdpBtn');
 
         let stream = null;
         let analysisRegion = null;
@@ -293,13 +264,11 @@
         let currentBrightness = 0;
         let trendData = [];
 
-        // WebRTC
         let pc = null;
         let dataChannel = null;
         let isBroadcaster = false;
-        let isViewer = false;
 
-        // Дата/время
+        // Дата и время
         function updateDateTime() {
             const now = new Date();
             datetimeEl.textContent = now.toLocaleString('ru-RU', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit' });
@@ -352,14 +321,14 @@
                 try {
                     stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
                 } catch (err) {
-                    statusEl.textContent = '❌ Нет доступа к камере. Разрешите и перезагрузите.';
+                    statusEl.textContent = '❌ Нет доступа к камере';
                     return;
                 }
             }
             video.srcObject = stream;
             video.onloadedmetadata = () => {
                 video.play();
-                statusEl.textContent = '✅ Камера готова. Нажмите «Создать трансляцию».';
+                statusEl.textContent = '✅ Камера работает';
                 areaBtn.disabled = false;
                 calibrateBtn.disabled = false;
                 recordBtn.disabled = false;
@@ -368,7 +337,7 @@
             };
         }
 
-        // Выбор области (код без изменений)
+        // Выбор области
         function getCoords(e) {
             const rect = video.getBoundingClientRect();
             const clientX = e.touches ? e.touches[0].clientX : e.clientX;
@@ -435,6 +404,7 @@
             if (isSelecting) {
                 isSelecting = false;
                 areaBtn.textContent = '🎯 Область';
+                areaBtn.style.background = '#3498db';
                 regionSelector.style.display = 'none';
                 removeSelectionListeners();
                 return;
@@ -450,6 +420,7 @@
             analysisRegion = null;
             regionSelector.style.display = 'none';
             resetBtn.disabled = true;
+            statusEl.textContent = '🔄 Область сброшена';
         });
 
         calibrateBtn.addEventListener('click', () => {
@@ -526,37 +497,30 @@
             analyzeFrame();
         }
 
-        // ====== СОЗДАНИЕ ТРАНСЛЯЦИИ (ВЕЩАТЕЛЬ) ======
+        // Трансляция
         broadcastBtn.addEventListener('click', async () => {
-            if (!stream) return alert('Камера ещё не готова');
+            if (!stream) return;
             
-            if (pc) { pc.close(); pc = null; }
-
+            if (pc) pc.close();
             pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
             stream.getTracks().forEach(track => pc.addTrack(track, stream));
             isBroadcaster = true;
-            isViewer = false;
 
             dataChannel = pc.createDataChannel('transparency');
 
             pc.onicecandidate = (event) => {
                 if (!event.candidate) {
-                    // Сбор ICE завершён
                     const sdp = JSON.stringify(pc.localDescription);
-                    const sdpEncoded = btoa(sdp);
-                    const url = `${window.location.href}?sdp=${encodeURIComponent(sdpEncoded)}`;
+                    const encoded = btoa(sdp);
+                    const url = `${window.location.href.split('?')[0]}?sdp=${encodeURIComponent(encoded)}`;
                     
-                    // Показываем QR-код
-                    qrSection.style.display = 'flex';
-                    QRCode.toCanvas(qrCanvas, url, { width: 200 }, (err) => {
-                        if (err) console.error('QR error:', err);
-                    });
+                    qrSection.style.display = 'block';
+                    qrSection.innerHTML = '<h4>📱 Отсканируйте QR-код:</h4>';
+                    const canvas = document.createElement('canvas');
+                    qrSection.appendChild(canvas);
+                    QRCode.toCanvas(canvas, url, { width: 200 });
                     
-                    // Показываем SDP для ручного ввода
-                    sdpSection.style.display = 'block';
-                    remoteSdpInput.value = ''; // очищаем
-                    
-                    statusEl.textContent = '📡 Трансляция создана! Отсканируйте QR-код или скопируйте ссылку.';
+                    statusEl.textContent = '📡 Трансляция создана! Отсканируйте QR-код на втором устройстве.';
                     broadcastBtn.disabled = true;
                 }
             };
@@ -564,52 +528,33 @@
             pc.createOffer().then(offer => pc.setLocalDescription(offer));
         });
 
-        // ====== ПОДКЛЮЧЕНИЕ К ТРАНСЛЯЦИИ ======
-        connectSdpBtn.addEventListener('click', async () => {
-            const sdpStr = remoteSdpInput.value.trim();
-            if (!sdpStr) return alert('Вставьте SDP предложение');
-            
-            try {
-                const offer = JSON.parse(sdpStr);
-                await connectToOffer(offer);
-            } catch (e) {
-                alert('Ошибка парсинга SDP: ' + e.message);
-            }
-        });
-
-        // Автоподключение из URL
-        window.addEventListener('load', () => {
+        // Автоподключение по ссылке
+        function checkUrlForSDP() {
             const urlParams = new URLSearchParams(window.location.search);
             const sdpParam = urlParams.get('sdp');
             if (sdpParam) {
                 try {
-                    const sdpStr = atob(decodeURIComponent(sdpParam));
-                    const offer = JSON.parse(sdpStr);
-                    // Ждём готовности камеры
-                    const checkStream = setInterval(() => {
-                        if (stream) {
-                            clearInterval(checkStream);
-                            connectToOffer(offer);
-                        }
-                    }, 500);
+                    const sdp = JSON.parse(atob(decodeURIComponent(sdpParam)));
+                    if (stream) {
+                        connectAsViewer(sdp);
+                    } else {
+                        const wait = setInterval(() => {
+                            if (stream) {
+                                clearInterval(wait);
+                                connectAsViewer(sdp);
+                            }
+                        }, 500);
+                    }
                 } catch (e) {
-                    console.error('Ошибка автоподключения:', e);
+                    console.error('SDP parse error:', e);
                 }
             }
-            
-            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                statusEl.textContent = '❌ Браузер не поддерживает камеру.';
-                return;
-            }
-            startCamera();
-        });
+        }
 
-        async function connectToOffer(offer) {
-            if (pc) { pc.close(); pc = null; }
-
+        async function connectAsViewer(offer) {
+            if (pc) pc.close();
             pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
             isBroadcaster = false;
-            isViewer = true;
 
             pc.ontrack = (event) => {
                 video.srcObject = event.streams[0];
@@ -620,8 +565,7 @@
             };
 
             pc.ondatachannel = (event) => {
-                const channel = event.channel;
-                channel.onmessage = (e) => {
+                event.channel.onmessage = (e) => {
                     const data = JSON.parse(e.data);
                     currentTransparency = data.transparency;
                     currentBrightness = data.brightness;
@@ -634,28 +578,21 @@
                 };
             };
 
-            pc.onicecandidate = (event) => {
-                if (!event.candidate) {
-                    const answer = JSON.stringify(pc.localDescription);
-                    const answerEncoded = btoa(answer);
-                    const url = `${window.location.href.split('?')[0]}?sdp=${encodeURIComponent(answerEncoded)}`;
-                    
-                    qrSection.style.display = 'flex';
-                    QRCode.toCanvas(qrCanvas, url, { width: 200 });
-                    
-                    remoteSdpInput.value = answer;
-                    statusEl.textContent = '📡 Ответ сформирован. Отсканируйте QR-код на вещателе или скопируйте SDP.';
-                }
-            };
-
-            try {
-                await pc.setRemoteDescription(new RTCSessionDescription(offer));
-                const answer = await pc.createAnswer();
-                await pc.setLocalDescription(answer);
-            } catch (e) {
-                alert('Ошибка подключения: ' + e.message);
-            }
+            await pc.setRemoteDescription(new RTCSessionDescription(offer));
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            statusEl.textContent = '🔗 Подключено к трансляции';
         }
+
+        // Запуск
+        window.addEventListener('load', () => {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                statusEl.textContent = '❌ Браузер не поддерживает камеру';
+                return;
+            }
+            startCamera();
+            checkUrlForSDP();
+        });
 
         window.addEventListener('beforeunload', () => {
             if (stream) stream.getTracks().forEach(track => track.stop());
