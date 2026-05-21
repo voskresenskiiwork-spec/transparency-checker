@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>Прозрачность жидкости</title>
+    <script src="https://unpkg.com/qrcode@1.5.1/build/qrcode.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body {
@@ -178,25 +179,27 @@
             border: 1px solid #ddd;
             margin-top: 10px;
         }
-        .room-block {
-            margin: 10px 0;
+        .qr-section {
+            margin: 15px 0;
             display: flex;
-            gap: 8px;
-            justify-content: center;
-            flex-wrap: wrap;
+            flex-direction: column;
+            align-items: center;
         }
-        .room-block input {
-            padding: 10px;
-            border-radius: 8px;
-            border: 1px solid #ccc;
-            width: 60%;
-            font-size: 1rem;
-            text-align: center;
+        .qr-section canvas {
+            border: 5px solid white;
+            border-radius: 10px;
         }
-        .status-text {
-            font-size: 0.85rem;
-            color: #555;
+        .sdp-section {
+            margin: 10px 0;
+            text-align: left;
+        }
+        .sdp-section textarea {
+            width: 100%;
+            height: 70px;
+            font-size: 0.65rem;
+            font-family: monospace;
             margin: 5px 0;
+            resize: vertical;
         }
     </style>
 </head>
@@ -210,19 +213,12 @@
             <div id="regionSelector" class="region-selector"></div>
         </div>
 
-        <div class="room-block">
-            <input type="text" id="roomInput" placeholder="Имя комнаты">
-            <button id="createRoomBtn" class="broadcast-btn" disabled>📡 Создать трансляцию</button>
-            <button id="joinRoomBtn" disabled>🔗 Подключиться</button>
-        </div>
-
-        <div class="status-text" id="connectionStatus"></div>
-
         <div class="controls">
             <button id="areaBtn" disabled>🎯 Область</button>
             <button id="resetBtn" disabled>🔄 Сброс</button>
             <button id="calibrateBtn" class="calibrate-btn" disabled>📏 Калибровать</button>
             <button id="recordBtn" class="record-btn" disabled>📝 Записать</button>
+            <button id="broadcastBtn" class="broadcast-btn" disabled>📡 Создать трансляцию</button>
         </div>
 
         <div class="threshold-row">
@@ -242,7 +238,18 @@
             <div id="statusText">Загрузка камеры...</div>
         </div>
 
-        <canvas id="trendCanvas" class="trend-canvas" width="500" height="150"></canvas>
+        <!-- QR-код для подключения -->
+        <div class="qr-section" id="qrSection" style="display:none;">
+            <h4>📱 Отсканируйте QR-код на втором устройстве:</h4>
+            <canvas id="qrCanvas" width="200" height="200"></canvas>
+        </div>
+
+        <!-- Ручной ввод SDP -->
+        <div class="sdp-section" id="sdpSection" style="display:none;">
+            <h4>Или вставьте SDP вручную:</h4>
+            <textarea id="remoteSdpInput" placeholder="Вставьте SDP предложение..."></textarea>
+            <button id="connectSdpBtn">🔗 Подключиться</button>
+        </div>
 
         <div class="history" id="historyContainer">
             <h3>📋 История измерений</h3>
@@ -258,14 +265,11 @@
         const resetBtn = document.getElementById('resetBtn');
         const calibrateBtn = document.getElementById('calibrateBtn');
         const recordBtn = document.getElementById('recordBtn');
-        const createRoomBtn = document.getElementById('createRoomBtn');
-        const joinRoomBtn = document.getElementById('joinRoomBtn');
-        const roomInput = document.getElementById('roomInput');
+        const broadcastBtn = document.getElementById('broadcastBtn');
         const transparencyEl = document.getElementById('transparencyValue');
         const brightnessEl = document.getElementById('brightnessValue');
         const indicatorEl = document.getElementById('indicator');
         const statusEl = document.getElementById('statusText');
-        const connectionStatus = document.getElementById('connectionStatus');
         const regionSelector = document.getElementById('regionSelector');
         const thresholdInput = document.getElementById('threshold');
         const warningMsg = document.getElementById('warningMessage');
@@ -274,6 +278,11 @@
         const clearHistoryBtn = document.getElementById('clearHistoryBtn');
         const trendCanvas = document.getElementById('trendCanvas');
         const ctxTrend = trendCanvas.getContext('2d');
+        const qrSection = document.getElementById('qrSection');
+        const qrCanvas = document.getElementById('qrCanvas');
+        const sdpSection = document.getElementById('sdpSection');
+        const remoteSdpInput = document.getElementById('remoteSdpInput');
+        const connectSdpBtn = document.getElementById('connectSdpBtn');
 
         let stream = null;
         let analysisRegion = null;
@@ -284,7 +293,7 @@
         let currentBrightness = 0;
         let trendData = [];
 
-        // WebRTC вручную (без сервера)
+        // WebRTC
         let pc = null;
         let dataChannel = null;
         let isBroadcaster = false;
@@ -350,17 +359,16 @@
             video.srcObject = stream;
             video.onloadedmetadata = () => {
                 video.play();
-                statusEl.textContent = '✅ Камера готова. Вы можете создать трансляцию или подключиться.';
+                statusEl.textContent = '✅ Камера готова. Нажмите «Создать трансляцию».';
                 areaBtn.disabled = false;
                 calibrateBtn.disabled = false;
                 recordBtn.disabled = false;
-                createRoomBtn.disabled = false;
-                joinRoomBtn.disabled = false;
+                broadcastBtn.disabled = false;
                 startAnalysis();
             };
         }
 
-        // Выбор области
+        // Выбор области (код без изменений)
         function getCoords(e) {
             const rect = video.getBoundingClientRect();
             const clientX = e.touches ? e.touches[0].clientX : e.clientX;
@@ -442,7 +450,6 @@
             analysisRegion = null;
             regionSelector.style.display = 'none';
             resetBtn.disabled = true;
-            statusEl.textContent = '🔄 Область сброшена.';
         });
 
         calibrateBtn.addEventListener('click', () => {
@@ -520,11 +527,9 @@
         }
 
         // ====== СОЗДАНИЕ ТРАНСЛЯЦИИ (ВЕЩАТЕЛЬ) ======
-        createRoomBtn.addEventListener('click', () => {
-            const room = roomInput.value.trim();
-            if (!room) return alert('Введите имя комнаты');
+        broadcastBtn.addEventListener('click', async () => {
             if (!stream) return alert('Камера ещё не готова');
-
+            
             if (pc) { pc.close(); pc = null; }
 
             pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
@@ -533,44 +538,73 @@
             isViewer = false;
 
             dataChannel = pc.createDataChannel('transparency');
-            dataChannel.onopen = () => console.log('DataChannel opened (broadcaster)');
-            dataChannel.onclose = () => console.log('DataChannel closed');
-
-            pc.ontrack = () => {};
-            pc.ondatachannel = () => {};
 
             pc.onicecandidate = (event) => {
                 if (!event.candidate) {
-                    // Сбор ICE завершён, показываем полный SDP
-                    const offer = pc.localDescription;
-                    const roomState = JSON.parse(localStorage.getItem('room_' + room) || '{}');
-                    roomState.offer = offer;
-                    roomState.time = Date.now();
-                    localStorage.setItem('room_' + room, JSON.stringify(roomState));
-                    connectionStatus.textContent = '📡 Трансляция создана! Ожидание подключения... (SDP сохранён локально)';
-                    statusEl.textContent = 'Трансляция активна. На втором устройстве введите ту же комнату и нажмите «Подключиться».';
+                    // Сбор ICE завершён
+                    const sdp = JSON.stringify(pc.localDescription);
+                    const sdpEncoded = btoa(sdp);
+                    const url = `${window.location.href}?sdp=${encodeURIComponent(sdpEncoded)}`;
+                    
+                    // Показываем QR-код
+                    qrSection.style.display = 'flex';
+                    QRCode.toCanvas(qrCanvas, url, { width: 200 }, (err) => {
+                        if (err) console.error('QR error:', err);
+                    });
+                    
+                    // Показываем SDP для ручного ввода
+                    sdpSection.style.display = 'block';
+                    remoteSdpInput.value = ''; // очищаем
+                    
+                    statusEl.textContent = '📡 Трансляция создана! Отсканируйте QR-код или скопируйте ссылку.';
+                    broadcastBtn.disabled = true;
                 }
             };
 
             pc.createOffer().then(offer => pc.setLocalDescription(offer));
         });
 
-        // ====== ПОДКЛЮЧЕНИЕ К ТРАНСЛЯЦИИ (НАБЛЮДАТЕЛЬ) ======
-        joinRoomBtn.addEventListener('click', async () => {
-            const room = roomInput.value.trim();
-            if (!room) return alert('Введите имя комнаты');
-
-            // Загружаем SDP из localStorage
-            const roomState = JSON.parse(localStorage.getItem('room_' + room) || '{}');
-            if (!roomState.offer) {
-                return alert('Трансляция с таким именем не найдена. Сначала создайте её на устройстве-вещателе.');
+        // ====== ПОДКЛЮЧЕНИЕ К ТРАНСЛЯЦИИ ======
+        connectSdpBtn.addEventListener('click', async () => {
+            const sdpStr = remoteSdpInput.value.trim();
+            if (!sdpStr) return alert('Вставьте SDP предложение');
+            
+            try {
+                const offer = JSON.parse(sdpStr);
+                await connectToOffer(offer);
+            } catch (e) {
+                alert('Ошибка парсинга SDP: ' + e.message);
             }
+        });
 
-            // Проверяем, не устарело ли предложение (2 минуты)
-            if (Date.now() - roomState.time > 120000) {
-                return alert('Трансляция устарела. Обновите создание комнаты на вещателе.');
+        // Автоподключение из URL
+        window.addEventListener('load', () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const sdpParam = urlParams.get('sdp');
+            if (sdpParam) {
+                try {
+                    const sdpStr = atob(decodeURIComponent(sdpParam));
+                    const offer = JSON.parse(sdpStr);
+                    // Ждём готовности камеры
+                    const checkStream = setInterval(() => {
+                        if (stream) {
+                            clearInterval(checkStream);
+                            connectToOffer(offer);
+                        }
+                    }, 500);
+                } catch (e) {
+                    console.error('Ошибка автоподключения:', e);
+                }
             }
+            
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                statusEl.textContent = '❌ Браузер не поддерживает камеру.';
+                return;
+            }
+            startCamera();
+        });
 
+        async function connectToOffer(offer) {
             if (pc) { pc.close(); pc = null; }
 
             pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
@@ -582,6 +616,7 @@
                 statusEl.textContent = '📡 Видео получено!';
                 areaBtn.disabled = true;
                 calibrateBtn.disabled = true;
+                broadcastBtn.disabled = true;
             };
 
             pc.ondatachannel = (event) => {
@@ -601,75 +636,26 @@
 
             pc.onicecandidate = (event) => {
                 if (!event.candidate) {
-                    const answer = pc.localDescription;
-                    const updatedState = roomState;
-                    updatedState.answer = answer;
-                    updatedState.time = Date.now();
-                    localStorage.setItem('room_' + room, JSON.stringify(updatedState));
-                    connectionStatus.textContent = '📡 Ответ сформирован. Завершаем подключение...';
+                    const answer = JSON.stringify(pc.localDescription);
+                    const answerEncoded = btoa(answer);
+                    const url = `${window.location.href.split('?')[0]}?sdp=${encodeURIComponent(answerEncoded)}`;
+                    
+                    qrSection.style.display = 'flex';
+                    QRCode.toCanvas(qrCanvas, url, { width: 200 });
+                    
+                    remoteSdpInput.value = answer;
+                    statusEl.textContent = '📡 Ответ сформирован. Отсканируйте QR-код на вещателе или скопируйте SDP.';
                 }
             };
 
             try {
-                await pc.setRemoteDescription(new RTCSessionDescription(roomState.offer));
+                await pc.setRemoteDescription(new RTCSessionDescription(offer));
                 const answer = await pc.createAnswer();
                 await pc.setLocalDescription(answer);
             } catch (e) {
                 alert('Ошибка подключения: ' + e.message);
-                return;
             }
-
-            // Через секунду проверяем, появился ли ответ от вещателя
-            setTimeout(async () => {
-                const updatedState = JSON.parse(localStorage.getItem('room_' + room) || '{}');
-                if (!updatedState.answer) {
-                    connectionStatus.textContent = '⏳ Ожидание ответа...';
-                    return;
-                }
-                // Вещатель должен прочитать answer из localStorage
-                // На вещателе запускаем обработчик
-                if (isBroadcaster) {
-                    try {
-                        await pc.setRemoteDescription(new RTCSessionDescription(updatedState.answer));
-                        statusEl.textContent = '✅ Соединение установлено! Идёт трансляция.';
-                        connectionStatus.textContent = '🔗 Наблюдатель подключён';
-                    } catch (e) {
-                        console.error('Ошибка принятия ответа:', e);
-                    }
-                }
-            }, 2000);
-
-            statusEl.textContent = 'Подключаюсь к трансляции...';
-            connectionStatus.textContent = '⏳ Устанавливаю соединение...';
-        });
-
-        // Автоподхват ответа вещателем
-        setInterval(() => {
-            const room = roomInput.value.trim();
-            if (!room || !isBroadcaster || !pc) return;
-            const roomState = JSON.parse(localStorage.getItem('room_' + room) || '{}');
-            if (roomState.answer && pc.signalingState !== 'stable') {
-                pc.setRemoteDescription(new RTCSessionDescription(roomState.answer))
-                    .then(() => {
-                        statusEl.textContent = '✅ Соединение установлено! Идёт трансляция.';
-                        connectionStatus.textContent = '🔗 Наблюдатель подключён';
-                        // Очищаем, чтобы не повторять
-                        const state = roomState;
-                        delete state.answer;
-                        localStorage.setItem('room_' + room, JSON.stringify(state));
-                    })
-                    .catch((e) => console.error('Auto-answer error:', e));
-            }
-        }, 3000);
-
-        // Запуск
-        window.addEventListener('load', () => {
-            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                statusEl.textContent = '❌ Браузер не поддерживает камеру.';
-                return;
-            }
-            startCamera();
-        });
+        }
 
         window.addEventListener('beforeunload', () => {
             if (stream) stream.getTracks().forEach(track => track.stop());
