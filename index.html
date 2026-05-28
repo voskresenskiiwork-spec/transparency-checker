@@ -103,7 +103,7 @@
             border-radius: 14px;
             background: var(--surface); 
             color: var(--text); 
-            font-size: 0.8rem; 
+            font-size: 0.82rem; 
             font-weight: 600; 
             cursor: pointer;
             transition: all 0.2s ease; 
@@ -243,9 +243,6 @@
             font-size: 1.5rem; 
             color: var(--text);
         }
-        .transparency-value {
-            color: var(--green);
-        }
         
         #statusText { 
             font-size: 0.85rem; 
@@ -337,13 +334,12 @@
         <div class="controls">
             <button id="areaBtn" disabled>🎯 Область</button>
             <button id="resetBtn" class="btn-red" disabled>🔄 Сброс</button>
-            <button id="calibrateLowBtn" class="btn-green" disabled>📏 100%</button>
-            <button id="calibrateHighBtn" class="btn-gray" disabled>⬛ 0%</button>
-            <button id="resetCalBtn" class="btn-orange" disabled>↩️ Калиб.</button>
+            <button id="calibrateLowBtn" class="btn-green" disabled>📏 Нижний предел</button>
+            <button id="calibrateHighBtn" class="btn-gray" disabled>⬛ Верхний предел</button>
+            <button id="recordBtn" class="btn-blue" disabled>📝 Записать</button>
         </div>
         
         <div class="controls">
-            <button id="recordBtn" class="btn-blue" disabled>📝 Запись</button>
             <button id="soundToggleBtn" class="btn-purple" disabled>🔊 Звук</button>
         </div>
         <div class="sound-indicator">
@@ -352,12 +348,12 @@
         </div>
         
         <div class="calibration-info">
-            <span class="cal-badge">100%: <span id="lowCalValue">—</span></span>
-            <span class="cal-badge">0%: <span id="highCalValue">—</span></span>
+            <span class="cal-badge">Нижний предел (100%): <span id="lowCalValue">—</span></span>
+            <span class="cal-badge">Верхний предел (0%): <span id="highCalValue">—</span></span>
         </div>
         
         <div class="threshold-row">
-            <label for="threshold">⚠️ Порог:</label>
+            <label for="threshold">⚠️ Порог WARNING:</label>
             <input type="number" id="threshold" value="30" min="0" max="100" step="1">
             <span>%</span>
         </div>
@@ -366,7 +362,7 @@
         
         <div class="result-card">
             <div class="stats">
-                <span>Прозрачность <span class="value transparency-value" id="transparencyValue">0%</span></span>
+                <span>Прозрачность <span class="value" id="transparencyValue">0%</span></span>
                 <span>Яркость <span class="value" id="brightnessValue">0</span></span>
             </div>
             <div class="meter">
@@ -392,7 +388,6 @@
         const resetBtn = document.getElementById('resetBtn');
         const calibrateLowBtn = document.getElementById('calibrateLowBtn');
         const calibrateHighBtn = document.getElementById('calibrateHighBtn');
-        const resetCalBtn = document.getElementById('resetCalBtn');
         const recordBtn = document.getElementById('recordBtn');
         const soundToggleBtn = document.getElementById('soundToggleBtn');
         const transparencyEl = document.getElementById('transparencyValue');
@@ -422,29 +417,23 @@
         let currentTransparency = 0;
         let currentBrightness = 0;
         let trendData = [];
-        
-        // Звук
         let audioCtx = null;
         let soundEnabled = true;
         let lastBeepTime = 0;
-        let beepInterval = 2000; // интервал между сигналами в мс
+        let beepInterval = 2000;
 
-        // Инициализация аудио
         function initAudio() {
             if (!audioCtx) {
                 audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             }
         }
 
-        // Спокойный звуковой сигнал
         function playCalmBeep() {
             if (!soundEnabled || !audioCtx) return;
-            
             const now = Date.now();
             if (now - lastBeepTime < beepInterval) return;
             lastBeepTime = now;
             
-            // Создаём мягкий звук: два коротких тона с низкой громкостью
             const playTone = (freq, startTime, duration, volume) => {
                 const osc = audioCtx.createOscillator();
                 const gain = audioCtx.createGain();
@@ -460,13 +449,11 @@
             };
             
             const t = audioCtx.currentTime;
-            playTone(440, t, 0.3, 0.08);       // Ля
-            playTone(554, t + 0.2, 0.25, 0.06); // До-диез
-            
+            playTone(440, t, 0.3, 0.08);
+            playTone(554, t + 0.2, 0.25, 0.06);
             beepInterval = Math.max(800, 3000 - (currentTransparency * 30));
         }
 
-        // Дата/время
         function updateDateTime() {
             const now = new Date();
             datetimeEl.textContent = now.toLocaleString('ru-RU', { 
@@ -477,17 +464,13 @@
         setInterval(updateDateTime, 1000);
         updateDateTime();
 
-        // Обновление отображения калибровки
         function updateCalibrationDisplay() {
             lowCalValueEl.textContent = calibrationLow !== null ? calibrationLow.toFixed(1) : '—';
             highCalValueEl.textContent = calibrationHigh !== null ? calibrationHigh.toFixed(1) : '—';
         }
 
-        // График (тёмная тема)
         function drawTrend() {
             ctxTrend.clearRect(0, 0, trendCanvas.width, trendCanvas.height);
-            
-            // Фон
             ctxTrend.fillStyle = '#282c34';
             ctxTrend.fillRect(0, 0, trendCanvas.width, trendCanvas.height);
             
@@ -496,7 +479,6 @@
             const points = trendData.slice(-30);
             const xStep = w / (points.length - 1);
             
-            // Градиент под графиком
             ctxTrend.beginPath();
             ctxTrend.moveTo(0, h);
             for (let i = 0; i < points.length; i++) {
@@ -512,7 +494,6 @@
             ctxTrend.fillStyle = gradient;
             ctxTrend.fill();
             
-            // Линия графика
             ctxTrend.beginPath();
             ctxTrend.strokeStyle = '#3fb950';
             ctxTrend.lineWidth = 2.5;
@@ -524,7 +505,6 @@
             }
             ctxTrend.stroke();
             
-            // Пороговая линия
             const threshold = parseFloat(thresholdInput.value) || 30;
             const yThreshold = h - (threshold / 100) * h;
             ctxTrend.beginPath();
@@ -543,7 +523,6 @@
             drawTrend();
         }
 
-        // Камера
         async function startCamera() {
             try {
                 stream = await navigator.mediaDevices.getUserMedia({
@@ -565,14 +544,12 @@
                 areaBtn.disabled = false;
                 calibrateLowBtn.disabled = false;
                 calibrateHighBtn.disabled = false;
-                resetCalBtn.disabled = false;
                 recordBtn.disabled = false;
                 soundToggleBtn.disabled = false;
                 startAnalysis();
             };
         }
 
-        // Выбор области
         function getCoords(e) {
             const rect = video.getBoundingClientRect();
             const clientX = e.touches ? e.touches[0].clientX : e.clientX;
@@ -652,22 +629,14 @@
             addSelectionListeners();
         });
 
-        // Сброс
+        // Кнопка "Сброс" — сбрасывает и область, и калибровку
         resetBtn.addEventListener('click', () => {
             analysisRegion = null;
             regionSelector.style.display = 'none';
             calibrationLow = null;
             calibrationHigh = null;
             updateCalibrationDisplay();
-            statusEl.textContent = '🔄 Всё сброшено: область и калибровка.';
-        });
-
-        // Сброс калибровки
-        resetCalBtn.addEventListener('click', () => {
-            calibrationLow = null;
-            calibrationHigh = null;
-            updateCalibrationDisplay();
-            statusEl.textContent = '↩️ Калибровка сброшена.';
+            statusEl.textContent = '🔄 Всё сброшено: область анализа и калибровка.';
         });
 
         // Калибровка: нижний предел (100%)
@@ -678,7 +647,7 @@
             updateCalibrationDisplay();
             statusEl.textContent = `📏 Нижний предел (100%): ${calibrationLow.toFixed(1)}`;
             if (calibrationHigh !== null && calibrationHigh >= calibrationLow) {
-                statusEl.textContent += ' ⚠️ Верхний предел ярче нижнего!';
+                statusEl.textContent += ' ⚠️ Верхний предел ярче нижнего! Сбросьте верхний предел.';
             }
         });
 
@@ -687,7 +656,7 @@
             if (!stream) return;
             initAudio();
             if (calibrationLow !== null && currentBrightness >= calibrationLow) {
-                statusEl.textContent = '❌ Верхний предел не может быть ярче нижнего!';
+                statusEl.textContent = '❌ Верхний предел не может быть ярче нижнего! Сделайте жидкость темнее.';
                 return;
             }
             calibrationHigh = currentBrightness;
@@ -695,7 +664,6 @@
             statusEl.textContent = `⬛ Верхний предел (0%): ${calibrationHigh.toFixed(1)}`;
         });
 
-        // Запись в историю
         function addHistoryRecord() {
             const now = new Date();
             const threshold = parseFloat(thresholdInput.value) || 30;
@@ -711,7 +679,6 @@
         });
         clearHistoryBtn.addEventListener('click', () => historyList.innerHTML = '');
 
-        // Переключение звука
         soundToggleBtn.addEventListener('click', () => {
             initAudio();
             soundEnabled = !soundEnabled;
@@ -726,7 +693,6 @@
             }
         });
 
-        // Анализ кадра
         function analyzeFrame() {
             if (!stream || video.readyState < 2) {
                 animationId = requestAnimationFrame(analyzeFrame);
@@ -756,7 +722,6 @@
             }
             currentBrightness = totalBrightness / (data.length / 4);
             
-            // Расчёт прозрачности
             if (calibrationLow !== null && calibrationHigh !== null && calibrationLow > calibrationHigh) {
                 currentTransparency = ((currentBrightness - calibrationHigh) / (calibrationLow - calibrationHigh)) * 100;
             } else if (calibrationLow !== null) {
@@ -792,7 +757,6 @@
             analyzeFrame();
         }
 
-        // Запуск
         window.addEventListener('load', () => {
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
                 statusEl.textContent = '❌ Браузер не поддерживает камеру.';
