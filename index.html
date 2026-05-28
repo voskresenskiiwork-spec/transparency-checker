@@ -83,6 +83,8 @@
         .btn-red { background: #3a1a1a; border-color: var(--red); color: var(--red); }
         .btn-blue { background: #1a2a3a; border-color: var(--blue); color: var(--blue); }
         .btn-purple { background: #2a1a3a; border-color: var(--purple); color: var(--purple); }
+        .btn-yellow { background: #3a3a1a; border-color: var(--yellow); color: var(--yellow); }
+        .btn-cyan { background: #1a3a3a; border-color: #56d4dd; color: #56d4dd; }
         
         .sound-indicator {
             display: inline-flex; align-items: center; gap: 6px; font-size: 0.7rem;
@@ -139,6 +141,14 @@
         .value { font-weight: 700; font-size: 1.4rem; color: var(--text); }
         #statusText { font-size: 0.8rem; color: var(--text-secondary); margin-top: 6px; min-height: 1.1em; }
         
+        .statistics {
+            background: var(--surface); border-radius: 12px; padding: 10px; margin-top: 8px;
+            border: 1px solid var(--border); font-size: 0.75rem; color: var(--text-secondary);
+            display: flex; flex-wrap: wrap; justify-content: space-around; gap: 8px;
+        }
+        .statistics .stat-item { text-align: center; }
+        .statistics .stat-value { font-weight: 700; color: var(--text); font-size: 1rem; }
+        
         .history {
             margin-top: 14px; text-align: left; max-height: 200px; overflow-y: auto;
             border-top: 1px solid var(--border); padding-top: 10px;
@@ -161,6 +171,13 @@
             width: 100%; height: 130px; background: var(--surface); border-radius: 12px;
             border: 1px solid var(--border); margin-top: 10px;
         }
+        
+        /* Таймер */
+        .timer-row {
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+            margin: 8px 0; color: var(--text-secondary); font-size: 0.75rem;
+        }
+        .timer-row input { width: 50px; }
     </style>
 </head>
 <body>
@@ -175,6 +192,7 @@
             <div id="regionSelector" class="region-selector"></div>
         </div>
         
+        <!-- Основные кнопки -->
         <div class="controls">
             <button id="areaBtn" disabled>🎯 Область</button>
             <button id="resetBtn" class="btn-red" disabled>🔄 Сброс</button>
@@ -183,14 +201,28 @@
             <button id="recordBtn" class="btn-blue" disabled>📝 Записать</button>
         </div>
         
+        <!-- Дополнительные функции -->
         <div class="controls">
             <button id="soundToggleBtn" class="btn-purple" disabled>🔊 Звук</button>
+            <button id="snapshotBtn" class="btn-cyan" disabled>📸 Снимок</button>
+            <button id="exportBtn" class="btn-yellow" disabled>📊 Экспорт</button>
+            <button id="autoRecordBtn" class="btn-blue" disabled>⏱️ Авто</button>
         </div>
+        
         <div class="sound-indicator">
             <div class="sound-dot" id="soundDot"></div>
             <span id="soundStatus">Звук включён</span>
         </div>
         
+        <!-- Таймер авто-записи -->
+        <div class="timer-row" id="timerRow" style="display:none;">
+            <label>Интервал (сек):</label>
+            <input type="number" id="timerInterval" value="5" min="1" max="60" step="1">
+            <span id="timerCountdown">—</span>
+            <button id="stopAutoBtn" class="btn-red" style="flex:0 0 auto; min-width:40px;">✕</button>
+        </div>
+        
+        <!-- Ручной ввод пределов -->
         <div class="calibration-inputs">
             <label>Нижний (100%):</label>
             <input type="number" id="lowCalInput" placeholder="Авто" step="0.1">
@@ -199,14 +231,17 @@
             <button id="applyCalBtn" class="btn-blue" style="flex:0 0 auto; min-width:45px;">✓</button>
         </div>
         
+        <!-- Порог WARNING -->
         <div class="threshold-row">
-            <label for="threshold">⚠️ Порог WARNING:</label>
+            <label for="threshold">⚠️ Порог:</label>
             <input type="number" id="threshold" value="30" min="0" max="100" step="1">
             <span>%</span>
         </div>
         
+        <!-- Предупреждение -->
         <div id="warningMessage" class="warning-text"></div>
         
+        <!-- Результаты -->
         <div class="result-card">
             <div class="stats">
                 <span>Прозрачность <span class="value" id="transparencyValue">0%</span></span>
@@ -219,8 +254,18 @@
             <div id="statusText">Загрузка камеры...</div>
         </div>
         
+        <!-- Статистика -->
+        <div class="statistics" id="statistics">
+            <div class="stat-item">Среднее: <span class="stat-value" id="statAvg">—</span></div>
+            <div class="stat-item">Мин: <span class="stat-value" id="statMin">—</span></div>
+            <div class="stat-item">Макс: <span class="stat-value" id="statMax">—</span></div>
+            <div class="stat-item">Измерений: <span class="stat-value" id="statCount">0</span></div>
+        </div>
+        
+        <!-- График -->
         <canvas id="trendCanvas" class="trend-canvas" width="500" height="130"></canvas>
         
+        <!-- История -->
         <div class="history" id="historyContainer">
             <h3>📋 История измерений</h3>
             <div id="historyList"></div>
@@ -229,6 +274,7 @@
     </div>
 
     <script>
+        // ===== DOM элементы =====
         const video = document.getElementById('video');
         const areaBtn = document.getElementById('areaBtn');
         const resetBtn = document.getElementById('resetBtn');
@@ -236,6 +282,10 @@
         const calibrateHighBtn = document.getElementById('calibrateHighBtn');
         const recordBtn = document.getElementById('recordBtn');
         const soundToggleBtn = document.getElementById('soundToggleBtn');
+        const snapshotBtn = document.getElementById('snapshotBtn');
+        const exportBtn = document.getElementById('exportBtn');
+        const autoRecordBtn = document.getElementById('autoRecordBtn');
+        const stopAutoBtn = document.getElementById('stopAutoBtn');
         const transparencyEl = document.getElementById('transparencyValue');
         const brightnessEl = document.getElementById('brightnessValue');
         const indicatorEl = document.getElementById('indicator');
@@ -254,12 +304,23 @@
         const applyCalBtn = document.getElementById('applyCalBtn');
         const soundDot = document.getElementById('soundDot');
         const soundStatusEl = document.getElementById('soundStatus');
+        const timerRow = document.getElementById('timerRow');
+        const timerInterval = document.getElementById('timerInterval');
+        const timerCountdown = document.getElementById('timerCountdown');
+        const statAvg = document.getElementById('statAvg');
+        const statMin = document.getElementById('statMin');
+        const statMax = document.getElementById('statMax');
+        const statCount = document.getElementById('statCount');
 
+        // ===== Состояние =====
         let stream = null, analysisRegion = null, isSelecting = false, animationId = null;
         let calibrationLow = null, calibrationHigh = null;
         let currentTransparency = 0, currentBrightness = 0, trendData = [];
         let audioCtx = null, soundEnabled = true, lastBeepTime = 0, beepInterval = 2000;
+        let autoRecordTimer = null, autoRecordSeconds = 0;
+        let historyRecords = []; // массив для статистики и экспорта
 
+        // ===== Аудио =====
         function initAudio() {
             if (!audioCtx) {
                 audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -289,6 +350,7 @@
             beepInterval = Math.max(800, 3000 - (currentTransparency * 30));
         }
 
+        // ===== Дата/время =====
         function updateDateTime() {
             datetimeEl.textContent = new Date().toLocaleString('ru-RU', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit' });
         }
@@ -300,6 +362,24 @@
             highCalInput.value = calibrationHigh !== null ? calibrationHigh.toFixed(1) : '';
         }
 
+        // ===== Статистика =====
+        function updateStatistics() {
+            if (historyRecords.length === 0) {
+                statAvg.textContent = '—';
+                statMin.textContent = '—';
+                statMax.textContent = '—';
+                statCount.textContent = '0';
+                return;
+            }
+            const values = historyRecords.map(r => r.transparency);
+            const sum = values.reduce((a, b) => a + b, 0);
+            statAvg.textContent = (sum / values.length).toFixed(1) + '%';
+            statMin.textContent = Math.min(...values).toFixed(1) + '%';
+            statMax.textContent = Math.max(...values).toFixed(1) + '%';
+            statCount.textContent = values.length;
+        }
+
+        // ===== График =====
         function drawTrend() {
             ctxTrend.clearRect(0, 0, trendCanvas.width, trendCanvas.height);
             ctxTrend.fillStyle = '#282c34';
@@ -332,6 +412,7 @@
             drawTrend();
         }
 
+        // ===== Камера =====
         async function startCamera() {
             try {
                 stream = await navigator.mediaDevices.getUserMedia({
@@ -340,22 +421,26 @@
                 });
             } catch (e) {
                 try { stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false }); }
-                catch (err) { statusEl.textContent = '❌ Нет доступа к камере. Разрешите и перезагрузите.'; return; }
+                catch (err) { statusEl.textContent = '❌ Нет доступа к камере'; return; }
             }
             video.srcObject = stream;
             video.onloadedmetadata = () => {
                 video.play();
-                statusEl.textContent = '✅ Камера работает.';
+                statusEl.textContent = '✅ Камера работает';
                 areaBtn.disabled = false;
                 calibrateLowBtn.disabled = false;
                 calibrateHighBtn.disabled = false;
                 recordBtn.disabled = false;
                 soundToggleBtn.disabled = false;
+                snapshotBtn.disabled = false;
+                exportBtn.disabled = false;
+                autoRecordBtn.disabled = false;
                 resetBtn.disabled = false;
                 startAnalysis();
             };
         }
 
+        // ===== Выбор области =====
         function getCoords(e) {
             const r = video.getBoundingClientRect();
             const cx = e.touches ? e.touches[0].clientX : e.clientX;
@@ -387,23 +472,20 @@
             if(!stream) return; isSelecting=true; areaBtn.textContent='✋ Отменить'; addListeners();
         });
 
-        // 🔧 Кнопка "Сброс" — исправлена и работает
+        // ===== Кнопки =====
         resetBtn.addEventListener('click', () => {
             analysisRegion = null;
             regionSelector.style.display = 'none';
             calibrationLow = null;
             calibrationHigh = null;
             updateCalInputs();
-            statusEl.textContent = '🔄 Область и калибровка сброшены.';
-            console.log('Сброс выполнен: область и калибровка очищены.');
+            statusEl.textContent = '🔄 Область и калибровка сброшены';
         });
 
         calibrateLowBtn.addEventListener('click', () => {
             if(!stream) return; initAudio();
             calibrationLow = currentBrightness; updateCalInputs();
             statusEl.textContent = '📏 Нижний предел (100%): ' + calibrationLow.toFixed(1);
-            if(calibrationHigh !== null && calibrationHigh >= calibrationLow)
-                statusEl.textContent += ' ⚠️ Верхний предел ярче нижнего!';
         });
 
         calibrateHighBtn.addEventListener('click', () => {
@@ -427,37 +509,130 @@
                 calibrationHigh = highVal;
             }
             updateCalInputs();
-            statusEl.textContent = '✅ Пределы обновлены.';
+            statusEl.textContent = '✅ Пределы обновлены';
         });
 
+        // ===== Запись в историю =====
         function addHistoryRecord() {
             const now = new Date();
             const timeStr = now.toLocaleTimeString('ru-RU');
             const dateStr = now.toLocaleDateString('ru-RU');
             const threshold = parseFloat(thresholdInput.value) || 30;
             const warning = currentTransparency < threshold;
-            
             const lowStr = calibrationLow !== null ? calibrationLow.toFixed(1) : '—';
             const highStr = calibrationHigh !== null ? calibrationHigh.toFixed(1) : '—';
+            
+            // Сохраняем для статистики и экспорта
+            historyRecords.push({
+                date: dateStr,
+                time: timeStr,
+                transparency: currentTransparency,
+                brightness: currentBrightness,
+                lowLimit: calibrationLow,
+                highLimit: calibrationHigh,
+                warning: warning
+            });
             
             const div = document.createElement('div');
             div.className = 'history-item';
             div.innerHTML = `
-                <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div style="display:flex; justify-content:space-between;">
                     <span class="time">${dateStr} ${timeStr}</span>
-                    <span class="warning-badge" style="color:${warning ? 'var(--red)' : 'var(--green)'}">${warning ? '⚠️ WARNING' : '✅ Норма'}</span>
+                    <span class="warning-badge" style="color:${warning ? 'var(--red)' : 'var(--green)'}">${warning ? '⚠️' : '✅'}</span>
                 </div>
-                <div style="display:flex; justify-content:space-between; margin-top:3px;">
-                    <span class="transparency">Прозрачность: ${currentTransparency.toFixed(1)}%</span>
+                <div style="display:flex; justify-content:space-between; margin-top:2px;">
+                    <span class="transparency">${currentTransparency.toFixed(1)}%</span>
                     <span class="limits">Пределы: ${lowStr} / ${highStr}</span>
                 </div>
             `;
             historyList.prepend(div);
+            updateStatistics();
         }
         
         recordBtn.addEventListener('click', () => { if(!stream) return; addHistoryRecord(); });
-        clearHistoryBtn.addEventListener('click', () => historyList.innerHTML = '');
+        clearHistoryBtn.addEventListener('click', () => { historyList.innerHTML = ''; historyRecords = []; updateStatistics(); });
 
+        // ===== Снимок =====
+        snapshotBtn.addEventListener('click', () => {
+            if(!stream) return;
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0);
+            
+            // Накладываем данные
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.fillRect(0, 0, canvas.width, 60);
+            ctx.fillStyle = '#3fb950';
+            ctx.font = 'bold 24px sans-serif';
+            ctx.fillText('Прозрачность: ' + currentTransparency.toFixed(1) + '%', 20, 40);
+            
+            const link = document.createElement('a');
+            link.download = 'transparency_' + new Date().toISOString().slice(0,19).replace(/:/g,'-') + '.png';
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+            statusEl.textContent = '📸 Снимок сохранён';
+        });
+
+        // ===== Экспорт CSV =====
+        exportBtn.addEventListener('click', () => {
+            if(historyRecords.length === 0) {
+                statusEl.textContent = '❌ Нет данных для экспорта';
+                return;
+            }
+            let csv = 'Дата;Время;Прозрачность(%);Яркость;Нижний предел;Верхний предел;Статус\n';
+            historyRecords.forEach(r => {
+                csv += `${r.date};${r.time};${r.transparency.toFixed(1)};${r.brightness.toFixed(1)};${r.lowLimit !== null ? r.lowLimit.toFixed(1) : '—'};${r.highLimit !== null ? r.highLimit.toFixed(1) : '—'};${r.warning ? 'WARNING' : 'Норма'}\n`;
+            });
+            const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.download = 'transparency_data_' + new Date().toISOString().slice(0,10) + '.csv';
+            link.href = URL.createObjectURL(blob);
+            link.click();
+            statusEl.textContent = '📊 Экспорт выполнен (' + historyRecords.length + ' записей)';
+        });
+
+        // ===== Авто-запись =====
+        autoRecordBtn.addEventListener('click', () => {
+            if(autoRecordTimer) {
+                clearInterval(autoRecordTimer);
+                autoRecordTimer = null;
+                timerRow.style.display = 'none';
+                autoRecordBtn.textContent = '⏱️ Авто';
+                statusEl.textContent = 'Авто-запись остановлена';
+                return;
+            }
+            const interval = parseInt(timerInterval.value) || 5;
+            timerRow.style.display = 'flex';
+            autoRecordBtn.textContent = '⏸️ Стоп';
+            autoRecordSeconds = interval;
+            timerCountdown.textContent = autoRecordSeconds + ' сек';
+            
+            const countdownInterval = setInterval(() => {
+                autoRecordSeconds--;
+                timerCountdown.textContent = autoRecordSeconds > 0 ? autoRecordSeconds + ' сек' : 'Запись!';
+                if(autoRecordSeconds <= 0) autoRecordSeconds = interval;
+            }, 1000);
+            
+            autoRecordTimer = setInterval(() => {
+                if(!stream) return;
+                addHistoryRecord();
+            }, interval * 1000);
+            
+            stopAutoBtn.onclick = () => {
+                clearInterval(autoRecordTimer);
+                clearInterval(countdownInterval);
+                autoRecordTimer = null;
+                timerRow.style.display = 'none';
+                autoRecordBtn.textContent = '⏱️ Авто';
+                statusEl.textContent = 'Авто-запись остановлена';
+            };
+            
+            statusEl.textContent = '⏱️ Авто-запись каждые ' + interval + ' сек';
+        });
+
+        // ===== Звук =====
         soundToggleBtn.addEventListener('click', () => {
             initAudio();
             soundEnabled = !soundEnabled;
@@ -466,6 +641,7 @@
             soundStatusEl.textContent = soundEnabled ? 'Звук включён' : 'Звук выключен';
         });
 
+        // ===== Анализ кадра =====
         function analyzeFrame() {
             if(!stream || video.readyState < 2) { animationId = requestAnimationFrame(analyzeFrame); return; }
             const canvas = document.createElement('canvas');
@@ -506,15 +682,17 @@
 
         function startAnalysis() { if(animationId) cancelAnimationFrame(animationId); analyzeFrame(); }
 
+        // ===== Инициализация =====
         document.addEventListener('click', initAudio, { once: true });
         document.addEventListener('touchstart', initAudio, { once: true });
 
         window.addEventListener('load', () => {
-            if(!navigator.mediaDevices?.getUserMedia) { statusEl.textContent='❌ Браузер не поддерживает камеру.'; return; }
+            if(!navigator.mediaDevices?.getUserMedia) { statusEl.textContent='❌ Браузер не поддерживает камеру'; return; }
             startCamera();
         });
         window.addEventListener('beforeunload', () => {
             if(stream) stream.getTracks().forEach(t=>t.stop());
+            if(autoRecordTimer) clearInterval(autoRecordTimer);
         });
     </script>
 </body>
