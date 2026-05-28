@@ -83,7 +83,6 @@
         .btn-red { background: #3a1a1a; border-color: var(--red); color: var(--red); }
         .btn-blue { background: #1a2a3a; border-color: var(--blue); color: var(--blue); }
         .btn-purple { background: #2a1a3a; border-color: var(--purple); color: var(--purple); }
-        .btn-orange { background: #3a2a1a; border-color: var(--orange); color: var(--orange); }
         
         .sound-indicator {
             display: inline-flex; align-items: center; gap: 6px; font-size: 0.7rem;
@@ -186,7 +185,6 @@
         
         <div class="controls">
             <button id="soundToggleBtn" class="btn-purple" disabled>🔊 Звук</button>
-            <button id="fullResetBtn" class="btn-orange" disabled>💣 Полный сброс</button>
         </div>
         <div class="sound-indicator">
             <div class="sound-dot" id="soundDot"></div>
@@ -238,7 +236,6 @@
         const calibrateHighBtn = document.getElementById('calibrateHighBtn');
         const recordBtn = document.getElementById('recordBtn');
         const soundToggleBtn = document.getElementById('soundToggleBtn');
-        const fullResetBtn = document.getElementById('fullResetBtn');
         const transparencyEl = document.getElementById('transparencyValue');
         const brightnessEl = document.getElementById('brightnessValue');
         const indicatorEl = document.getElementById('indicator');
@@ -354,7 +351,7 @@
                 calibrateHighBtn.disabled = false;
                 recordBtn.disabled = false;
                 soundToggleBtn.disabled = false;
-                fullResetBtn.disabled = false;
+                resetBtn.disabled = false;
                 startAnalysis();
             };
         }
@@ -390,6 +387,7 @@
             if(!stream) return; isSelecting=true; areaBtn.textContent='✋ Отменить'; addListeners();
         });
 
+        // 🔧 Кнопка "Сброс" — исправлена и работает
         resetBtn.addEventListener('click', () => {
             analysisRegion = null;
             regionSelector.style.display = 'none';
@@ -397,27 +395,7 @@
             calibrationHigh = null;
             updateCalInputs();
             statusEl.textContent = '🔄 Область и калибровка сброшены.';
-        });
-
-        fullResetBtn.addEventListener('click', () => {
-            analysisRegion = null;
-            regionSelector.style.display = 'none';
-            calibrationLow = null;
-            calibrationHigh = null;
-            updateCalInputs();
-            trendData = [];
-            historyList.innerHTML = '';
-            thresholdInput.value = 30;
-            currentTransparency = 0;
-            currentBrightness = 0;
-            transparencyEl.textContent = '0%';
-            brightnessEl.textContent = '0';
-            indicatorEl.style.left = '0%';
-            meterFill.style.width = '0%';
-            warningMsg.textContent = '';
-            warningMsg.classList.remove('active');
-            drawTrend();
-            statusEl.textContent = '💣 Полный сброс выполнен. Всё очищено.';
+            console.log('Сброс выполнен: область и калибровка очищены.');
         });
 
         calibrateLowBtn.addEventListener('click', () => {
