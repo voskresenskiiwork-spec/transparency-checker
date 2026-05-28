@@ -65,7 +65,8 @@
         }
         button:active { transform: scale(0.96); }
         button:disabled { background: #bdc3c7; transform: none; }
-        .calibrate-btn { background: #27ae60; }
+        .calibrate-low-btn { background: #27ae60; }
+        .calibrate-high-btn { background: #7f8c8d; }
         .record-btn { background: #f39c12; }
         .threshold-row {
             display: flex; align-items: center; justify-content: center; gap: 10px; margin: 10px 0; flex-wrap: wrap;
@@ -107,6 +108,15 @@
             width: 100%; height: 150px; background: #fff; border-radius: 10px;
             border: 1px solid #ddd; margin-top: 10px;
         }
+        .calibration-info {
+            font-size: 0.8rem;
+            color: #555;
+            margin: 5px 0;
+            text-align: center;
+        }
+        .calibration-info span {
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -120,12 +130,18 @@
         <div class="controls">
             <button id="areaBtn" disabled>🎯 Область</button>
             <button id="resetBtn" disabled>🔄 Сброс</button>
-            <button id="calibrateBtn" class="calibrate-btn" disabled>📏 Калибровать</button>
+            <button id="calibrateLowBtn" class="calibrate-low-btn" disabled>📏 Нижний предел</button>
+            <button id="calibrateHighBtn" class="calibrate-high-btn" disabled>⬛ Верхний предел</button>
             <button id="recordBtn" class="record-btn" disabled>📝 Записать</button>
         </div>
+        <div class="calibration-info">
+            Нижний предел (100%): <span id="lowCalValue">—</span><br>
+            Верхний предел (0%): <span id="highCalValue">—</span>
+        </div>
         <div class="threshold-row">
-            <label for="threshold">Порог (0-100%):</label>
-            <input type="number" id="threshold" value="70" min="0" max="100" step="1">
+            <label for="threshold">Порог WARNING:</label>
+            <input type="number" id="threshold" value="30" min="0" max="100" step="1">
+            <span>%</span>
         </div>
         <div id="warningMessage" class="warning-text"></div>
         <div class="result-card">
@@ -149,7 +165,8 @@
         const video = document.getElementById('video');
         const areaBtn = document.getElementById('areaBtn');
         const resetBtn = document.getElementById('resetBtn');
-        const calibrateBtn = document.getElementById('calibrateBtn');
+        const calibrateLowBtn = document.getElementById('calibrateLowBtn');
+        const calibrateHighBtn = document.getElementById('calibrateHighBtn');
         const recordBtn = document.getElementById('recordBtn');
         const transparencyEl = document.getElementById('transparencyValue');
         const brightnessEl = document.getElementById('brightnessValue');
@@ -163,12 +180,18 @@
         const clearHistoryBtn = document.getElementById('clearHistoryBtn');
         const trendCanvas = document.getElementById('trendCanvas');
         const ctxTrend = trendCanvas.getContext('2d');
+        const lowCalValueEl = document.getElementById('lowCalValue');
+        const highCalValueEl = document.getElementById('highCalValue');
 
         let stream = null;
         let analysisRegion = null;
         let isSelecting = false;
         let animationId = null;
-        let calibrationBrightness = null;
+        
+        // Калибровка: два предела
+        let calibrationLow = null;   // нижний предел (яркость при 100% прозрачности)
+        let calibrationHigh = null;  // верхний предел (яркость при 0% прозрачности)
+        
         let currentTransparency = 0;
         let currentBrightness = 0;
         let trendData = [];
@@ -183,6 +206,12 @@
         }
         setInterval(updateDateTime, 1000);
         updateDateTime();
+
+        // Обновление отображения калибровочных значений
+        function updateCalibrationDisplay() {
+            lowCalValueEl.textContent = calibrationLow !== null ? calibrationLow.toFixed(1) : '—';
+            highCalValueEl.textContent = calibrationHigh !== null ? calibrationHigh.toFixed(1) : '—';
+        }
 
         // График
         function drawTrend() {
@@ -201,7 +230,7 @@
                 else ctxTrend.lineTo(x, y);
             }
             ctxTrend.stroke();
-            const threshold = parseFloat(thresholdInput.value) || 70;
+            const threshold = parseFloat(thresholdInput.value) || 30;
             const yThreshold = h - (threshold / 100) * h;
             ctxTrend.beginPath();
             ctxTrend.strokeStyle = '#e74c3c';
@@ -236,9 +265,10 @@
             video.srcObject = stream;
             video.onloadedmetadata = () => {
                 video.play();
-                statusEl.textContent = '✅ Камера работает. Выберите область для анализа.';
+                statusEl.textContent = '✅ Камера работает. Выберите область и выполните калибровку.';
                 areaBtn.disabled = false;
-                calibrateBtn.disabled = false;
+                calibrateLowBtn.disabled = false;
+                calibrateHighBtn.disabled = false;
                 recordBtn.disabled = false;
                 startAnalysis();
             };
@@ -335,15 +365,37 @@
             statusEl.textContent = '🔄 Область сброшена. Анализ по всему кадру.';
         });
 
-        calibrateBtn.addEventListener('click', () => {
+        // Калибровка: нижний предел (100% прозрачность — чистая вода, белый фон)
+        calibrateLowBtn.addEventListener('click', () => {
             if (!stream) return;
-            calibrationBrightness = currentBrightness;
-            statusEl.textContent = `📏 Калибровка: ${calibrationBrightness.toFixed(1)} = 100%`;
+            calibrationLow = currentBrightness;
+            updateCalibrationDisplay();
+            statusEl.textContent = `📏 Нижний предел (100%): ${calibrationLow.toFixed(1)}`;
+            
+            // Проверяем, не нарушен ли порядок пределов
+            if (calibrationHigh !== null && calibrationHigh >= calibrationLow) {
+                statusEl.textContent += ' ⚠️ Верхний предел ярче нижнего! Сбросьте верхний предел.';
+            }
+        });
+
+        // Калибровка: верхний предел (0% прозрачность — мутная/тёмная жидкость)
+        calibrateHighBtn.addEventListener('click', () => {
+            if (!stream) return;
+            
+            // Проверяем, не ярче ли текущее значение нижнего предела
+            if (calibrationLow !== null && currentBrightness >= calibrationLow) {
+                statusEl.textContent = '❌ Верхний предел не может быть ярче нижнего! Сделайте жидкость темнее.';
+                return;
+            }
+            
+            calibrationHigh = currentBrightness;
+            updateCalibrationDisplay();
+            statusEl.textContent = `⬛ Верхний предел (0%): ${calibrationHigh.toFixed(1)}`;
         });
 
         function addHistoryRecord() {
             const now = new Date();
-            const threshold = parseFloat(thresholdInput.value) || 70;
+            const threshold = parseFloat(thresholdInput.value) || 30;
             const warning = currentTransparency < threshold ? '⚠️ WARNING' : '✅ Норма';
             const div = document.createElement('div');
             div.className = 'history-item';
@@ -386,18 +438,26 @@
             }
             currentBrightness = totalBrightness / (data.length / 4);
             
-            if (calibrationBrightness && calibrationBrightness > 0) {
-                currentTransparency = Math.min(100, (currentBrightness / calibrationBrightness) * 100);
+            // Расчёт прозрачности по двум пределам
+            if (calibrationLow !== null && calibrationHigh !== null && calibrationLow > calibrationHigh) {
+                // Оба предела заданы корректно
+                currentTransparency = ((currentBrightness - calibrationHigh) / (calibrationLow - calibrationHigh)) * 100;
+                currentTransparency = Math.max(0, Math.min(100, currentTransparency));
+            } else if (calibrationLow !== null) {
+                // Задан только нижний предел (старое поведение)
+                currentTransparency = Math.min(100, (currentBrightness / calibrationLow) * 100);
+                currentTransparency = Math.max(0, currentTransparency);
             } else {
+                // Без калибровки — просто нормализуем к 255
                 currentTransparency = Math.min(100, (currentBrightness / 255) * 100);
+                currentTransparency = Math.max(0, currentTransparency);
             }
-            currentTransparency = Math.max(0, currentTransparency);
 
             transparencyEl.textContent = currentTransparency.toFixed(1) + '%';
             brightnessEl.textContent = currentBrightness.toFixed(1);
             indicatorEl.style.left = currentTransparency + '%';
 
-            const threshold = parseFloat(thresholdInput.value) || 70;
+            const threshold = parseFloat(thresholdInput.value) || 30;
             warningMsg.textContent = currentTransparency < threshold ? '⚠️ WARNING: Прозрачность ниже порога!' : '';
 
             addTrendPoint(currentTransparency);
