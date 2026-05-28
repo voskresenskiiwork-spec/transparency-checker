@@ -42,21 +42,9 @@
             border: 1px solid var(--border);
         }
         
-        .header {
-            margin-bottom: 12px;
-        }
-        h1 { 
-            font-size: 1.4rem; 
-            color: var(--text); 
-            font-weight: 700;
-            letter-spacing: -0.3px;
-            margin-bottom: 2px;
-        }
-        #datetime {
-            font-size: 0.8rem;
-            color: var(--text-secondary);
-            font-weight: 500;
-        }
+        .header { margin-bottom: 12px; }
+        h1 { font-size: 1.4rem; color: var(--text); font-weight: 700; letter-spacing: -0.3px; margin-bottom: 2px; }
+        #datetime { font-size: 0.8rem; color: var(--text-secondary); font-weight: 500; }
         
         .video-wrapper {
             position: relative;
@@ -70,6 +58,7 @@
             box-shadow: 0 4px 16px rgba(0,0,0,0.5);
         }
         video { width: 100%; height: 100%; object-fit: cover; display: block; }
+        
         .region-selector {
             position: absolute;
             border: 2px dashed var(--yellow);
@@ -81,15 +70,30 @@
         }
         
         .controls {
-            display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin: 8px 0;
+            display: flex; 
+            flex-wrap: wrap; 
+            gap: 6px; 
+            justify-content: center; 
+            margin: 8px 0;
         }
+        
         button {
-            flex: 1 1 auto; min-width: 65px; padding: 10px 6px; border: 1px solid var(--border); 
-            border-radius: 12px; background: var(--surface); color: var(--text); font-size: 0.78rem; 
-            font-weight: 600; cursor: pointer; transition: all 0.2s ease; touch-action: manipulation;
+            flex: 1 1 auto; 
+            min-width: 65px; 
+            padding: 10px 6px; 
+            border: 1px solid var(--border); 
+            border-radius: 12px;
+            background: var(--surface); 
+            color: var(--text); 
+            font-size: 0.78rem; 
+            font-weight: 600; 
+            cursor: pointer;
+            transition: all 0.2s ease; 
+            touch-action: manipulation;
         }
         button:active { transform: scale(0.96); opacity: 0.9; }
         button:disabled { background: #1c1f26; color: #555; cursor: not-allowed; transform: none; border-color: #222; }
+        
         .btn-green { background: #1a3a2a; border-color: var(--green); color: var(--green); }
         .btn-gray { background: #2a2d35; border-color: #555; color: #bbb; }
         .btn-red { background: #3a1a1a; border-color: var(--red); color: var(--red); }
@@ -97,78 +101,187 @@
         .btn-purple { background: #2a1a3a; border-color: var(--purple); color: var(--purple); }
         
         .sound-indicator {
-            display: inline-flex; align-items: center; gap: 6px; font-size: 0.7rem;
-            color: var(--text-secondary); margin: 2px 0 6px;
+            display: inline-flex; 
+            align-items: center; 
+            gap: 6px; 
+            font-size: 0.7rem;
+            color: var(--text-secondary); 
+            margin: 2px 0 6px;
         }
         .sound-dot {
-            width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite;
+            width: 6px; 
+            height: 6px; 
+            border-radius: 50%; 
+            background: var(--green); 
+            animation: pulse 2s infinite;
         }
         .sound-dot.muted { background: var(--red); animation: none; }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
         
         .calibration-inputs {
-            display: flex; gap: 10px; justify-content: center; align-items: center;
-            margin: 8px 0; flex-wrap: wrap; font-size: 0.78rem; color: var(--text-secondary);
+            display: flex; 
+            gap: 10px; 
+            justify-content: center; 
+            align-items: center;
+            margin: 8px 0; 
+            flex-wrap: wrap; 
+            font-size: 0.78rem; 
+            color: var(--text-secondary);
         }
         .calibration-inputs input {
-            width: 75px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border);
-            background: var(--surface); color: var(--text); font-size: 0.85rem; text-align: center; font-weight: 500;
+            width: 75px; 
+            padding: 6px 8px; 
+            border-radius: 8px; 
+            border: 1px solid var(--border);
+            background: var(--surface); 
+            color: var(--text); 
+            font-size: 0.85rem; 
+            text-align: center; 
+            font-weight: 500;
         }
         .calibration-inputs label { margin-right: 4px; }
         
         .threshold-row {
-            display: flex; align-items: center; justify-content: center; gap: 10px;
-            margin: 8px 0; flex-wrap: wrap; color: var(--text-secondary); font-size: 0.8rem;
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            gap: 10px;
+            margin: 8px 0; 
+            flex-wrap: wrap; 
+            color: var(--text-secondary); 
+            font-size: 0.8rem;
         }
         .threshold-row input {
-            width: 60px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border);
-            background: var(--surface); color: var(--text); font-size: 0.85rem; text-align: center; font-weight: 600;
+            width: 60px; 
+            padding: 6px 8px; 
+            border-radius: 8px; 
+            border: 1px solid var(--border);
+            background: var(--surface); 
+            color: var(--text); 
+            font-size: 0.85rem; 
+            text-align: center; 
+            font-weight: 600;
         }
         
         .warning-text {
-            color: var(--red); font-weight: 600; font-size: 1rem; margin: 6px 0; min-height: 1.3em;
+            color: var(--red); 
+            font-weight: 600; 
+            font-size: 1rem; 
+            margin: 6px 0; 
+            min-height: 1.3em;
         }
         .warning-text.active { animation: warningPulse 1.5s ease-in-out infinite; }
         @keyframes warningPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
         
         .result-card {
-            background: var(--surface); border-radius: 16px; padding: 14px; margin-top: 8px;
+            background: var(--surface); 
+            border-radius: 16px; 
+            padding: 14px; 
+            margin-top: 8px;
             border: 1px solid var(--border);
         }
+        
         .meter {
-            width: 100%; height: 24px; background: linear-gradient(to right, #1a1a1a, #2a2a2a, #3a3a3a, #e0e0e0);
-            border-radius: 12px; margin: 10px 0; position: relative; overflow: hidden; border: 1px solid var(--border);
+            width: 100%; 
+            height: 24px; 
+            background: linear-gradient(to right, #1a1a1a, #2a2a2a, #3a3a3a, #e0e0e0);
+            border-radius: 12px; 
+            margin: 10px 0; 
+            position: relative; 
+            overflow: hidden; 
+            border: 1px solid var(--border);
         }
         .meter-fill {
-            position: absolute; top: 0; left: 0; height: 100%;
+            position: absolute; 
+            top: 0; 
+            left: 0; 
+            height: 100%;
             background: linear-gradient(90deg, #3fb95044, #3fb95088);
-            border-radius: 12px 0 0 12px; transition: width 0.3s ease;
+            border-radius: 12px 0 0 12px; 
+            transition: width 0.3s ease;
         }
         .indicator {
-            position: absolute; top: -3px; width: 4px; height: 30px; background: var(--text);
-            border-radius: 2px; transition: left 0.2s ease; box-shadow: 0 0 8px rgba(255,255,255,0.3);
+            position: absolute; 
+            top: -3px; 
+            width: 4px; 
+            height: 30px; 
+            background: var(--text);
+            border-radius: 2px; 
+            transition: left 0.2s ease; 
+            box-shadow: 0 0 8px rgba(255,255,255,0.3);
         }
-        .stats { display: flex; justify-content: space-around; font-size: 0.9rem; margin: 6px 0; color: var(--text-secondary); }
+        
+        .stats { 
+            display: flex; 
+            justify-content: space-around; 
+            font-size: 0.9rem; 
+            margin: 6px 0; 
+            color: var(--text-secondary); 
+        }
         .value { font-weight: 700; font-size: 1.4rem; color: var(--text); }
         #statusText { font-size: 0.8rem; color: var(--text-secondary); margin-top: 6px; min-height: 1.1em; }
         
         .history {
-            margin-top: 14px; text-align: left; max-height: 140px; overflow-y: auto;
-            border-top: 1px solid var(--border); padding-top: 10px;
+            margin-top: 14px; 
+            text-align: left; 
+            max-height: 140px; 
+            overflow-y: auto;
+            border-top: 1px solid var(--border); 
+            padding-top: 10px;
         }
         .history h3 { margin-bottom: 6px; color: var(--text); font-size: 0.9rem; }
         .history-item {
-            font-size: 0.75rem; padding: 5px 7px; background: var(--surface); border-radius: 7px;
-            margin-bottom: 3px; display: flex; justify-content: space-between;
-            color: var(--text-secondary); border: 1px solid transparent;
+            font-size: 0.75rem; 
+            padding: 5px 7px; 
+            background: var(--surface); 
+            border-radius: 7px;
+            margin-bottom: 3px; 
+            display: flex; 
+            justify-content: space-between;
+            color: var(--text-secondary); 
+            border: 1px solid transparent;
         }
         .clear-history {
-            font-size: 0.7rem; color: var(--red); cursor: pointer; background: none; border: none;
-            padding: 4px 0; margin-top: 4px; opacity: 0.8;
+            font-size: 0.7rem; 
+            color: var(--red); 
+            cursor: pointer; 
+            background: none; 
+            border: none;
+            padding: 4px 0; 
+            margin-top: 4px; 
+            opacity: 0.8;
         }
+        
         .trend-canvas {
-            width: 100%; height: 130px; background: var(--surface); border-radius: 12px;
-            border: 1px solid var(--border); margin-top: 10px;
+            width: 100%; 
+            height: 130px; 
+            background: var(--surface); 
+            border-radius: 12px;
+            border: 1px solid var(--border); 
+            margin-top: 10px;
+        }
+
+        .remote-help {
+            margin-top: 12px;
+            padding: 10px;
+            background: var(--surface);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            text-align: left;
+        }
+        .remote-help summary {
+            cursor: pointer;
+            font-weight: 600;
+            color: var(--text);
+            margin-bottom: 6px;
+        }
+        .remote-help ul {
+            margin-left: 16px;
+        }
+        .remote-help li {
+            margin-bottom: 4px;
         }
     </style>
 </head>
@@ -200,7 +313,6 @@
             <span id="soundStatus">Звук включён</span>
         </div>
         
-        <!-- Ручной ввод пределов -->
         <div class="calibration-inputs">
             <label>Нижний (100%):</label>
             <input type="number" id="lowCalInput" placeholder="Авто" step="0.1">
@@ -236,10 +348,20 @@
             <div id="historyList"></div>
             <button class="clear-history" id="clearHistoryBtn">Очистить историю</button>
         </div>
+
+        <details class="remote-help">
+            <summary>📱 Как смотреть с компьютера</summary>
+            <ul>
+                <li><strong>Windows:</strong> встроенное приложение «Подключение к телефону» (Phone Link) — показывает экран и позволяет управлять</li>
+                <li><strong>TeamViewer:</strong> бесплатно, установите на ПК и телефон, введите ID с телефона</li>
+                <li><strong>AnyDesk:</strong> аналогично TeamViewer, быстрое подключение</li>
+                <li><strong>iPhone:</strong> QuickTime Player (через USB) или TeamViewer QuickSupport</li>
+            </ul>
+        </details>
     </div>
 
     <script>
-        // DOM
+        // DOM-элементы
         const video = document.getElementById('video');
         const areaBtn = document.getElementById('areaBtn');
         const resetBtn = document.getElementById('resetBtn');
@@ -266,12 +388,22 @@
         const soundDot = document.getElementById('soundDot');
         const soundStatusEl = document.getElementById('soundStatus');
 
-        let stream = null, analysisRegion = null, isSelecting = false, animationId = null;
-        let calibrationLow = null, calibrationHigh = null;
-        let currentTransparency = 0, currentBrightness = 0, trendData = [];
-        let audioCtx = null, soundEnabled = true, lastBeepTime = 0, beepInterval = 2000;
+        // Состояние
+        let stream = null;
+        let analysisRegion = null;
+        let isSelecting = false;
+        let animationId = null;
+        let calibrationLow = null;
+        let calibrationHigh = null;
+        let currentTransparency = 0;
+        let currentBrightness = 0;
+        let trendData = [];
+        let audioCtx = null;
+        let soundEnabled = true;
+        let lastBeepTime = 0;
+        let beepInterval = 2000;
 
-        // Инициализация аудио (разблокировка по первому взаимодействию)
+        // Аудио
         function initAudio() {
             if (!audioCtx) {
                 audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -305,6 +437,7 @@
             beepInterval = Math.max(800, 3000 - (currentTransparency * 30));
         }
 
+        // Дата/время
         function updateDateTime() {
             datetimeEl.textContent = new Date().toLocaleString('ru-RU', { 
                 day: '2-digit', month: '2-digit', year: 'numeric', 
@@ -319,40 +452,60 @@
             highCalInput.value = calibrationHigh !== null ? calibrationHigh.toFixed(1) : '';
         }
 
+        // График
         function drawTrend() {
             ctxTrend.clearRect(0, 0, trendCanvas.width, trendCanvas.height);
             ctxTrend.fillStyle = '#282c34';
             ctxTrend.fillRect(0, 0, trendCanvas.width, trendCanvas.height);
+            
             if (trendData.length < 2) return;
             const w = trendCanvas.width, h = trendCanvas.height;
             const points = trendData.slice(-30);
             const xStep = w / (points.length - 1);
-            ctxTrend.beginPath(); ctxTrend.moveTo(0, h);
+            
+            ctxTrend.beginPath();
+            ctxTrend.moveTo(0, h);
             for (let i = 0; i < points.length; i++) {
                 ctxTrend.lineTo(i * xStep, h - (points[i].transparency / 100) * h);
             }
-            ctxTrend.lineTo(w, h); ctxTrend.closePath();
-            const g = ctxTrend.createLinearGradient(0, 0, 0, h);
-            g.addColorStop(0, 'rgba(63,185,80,0.3)'); g.addColorStop(1, 'rgba(63,185,80,0)');
-            ctxTrend.fillStyle = g; ctxTrend.fill();
-            ctxTrend.beginPath(); ctxTrend.strokeStyle = '#3fb950'; ctxTrend.lineWidth = 2.5;
+            ctxTrend.lineTo(w, h);
+            ctxTrend.closePath();
+            const gradient = ctxTrend.createLinearGradient(0, 0, 0, h);
+            gradient.addColorStop(0, 'rgba(63, 185, 80, 0.3)');
+            gradient.addColorStop(1, 'rgba(63, 185, 80, 0)');
+            ctxTrend.fillStyle = gradient;
+            ctxTrend.fill();
+            
+            ctxTrend.beginPath();
+            ctxTrend.strokeStyle = '#3fb950';
+            ctxTrend.lineWidth = 2.5;
             for (let i = 0; i < points.length; i++) {
-                const x = i * xStep, y = h - (points[i].transparency / 100) * h;
-                i === 0 ? ctxTrend.moveTo(x, y) : ctxTrend.lineTo(x, y);
+                const x = i * xStep;
+                const y = h - (points[i].transparency / 100) * h;
+                if (i === 0) ctxTrend.moveTo(x, y);
+                else ctxTrend.lineTo(x, y);
             }
             ctxTrend.stroke();
-            const th = parseFloat(thresholdInput.value) || 30, yTh = h - (th / 100) * h;
-            ctxTrend.beginPath(); ctxTrend.strokeStyle = '#f85149'; ctxTrend.lineWidth = 1.5;
-            ctxTrend.setLineDash([6, 4]); ctxTrend.moveTo(0, yTh); ctxTrend.lineTo(w, yTh);
-            ctxTrend.stroke(); ctxTrend.setLineDash([]);
+            
+            const threshold = parseFloat(thresholdInput.value) || 30;
+            const yThreshold = h - (threshold / 100) * h;
+            ctxTrend.beginPath();
+            ctxTrend.strokeStyle = '#f85149';
+            ctxTrend.lineWidth = 1.5;
+            ctxTrend.setLineDash([6, 4]);
+            ctxTrend.moveTo(0, yThreshold);
+            ctxTrend.lineTo(w, yThreshold);
+            ctxTrend.stroke();
+            ctxTrend.setLineDash([]);
         }
 
-        function addTrendPoint(t) {
-            trendData.push({ time: Date.now(), transparency: t });
+        function addTrendPoint(transparency) {
+            trendData.push({ time: Date.now(), transparency });
             if (trendData.length > 60) trendData.shift();
             drawTrend();
         }
 
+        // Камера
         async function startCamera() {
             try {
                 stream = await navigator.mediaDevices.getUserMedia({
@@ -360,13 +513,17 @@
                     audio: false
                 });
             } catch (e) {
-                try { stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false }); }
-                catch (err) { statusEl.textContent = '❌ Нет доступа к камере'; return; }
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                } catch (err) {
+                    statusEl.textContent = '❌ Нет доступа к камере. Разрешите использование и перезагрузите страницу.';
+                    return;
+                }
             }
             video.srcObject = stream;
             video.onloadedmetadata = () => {
                 video.play();
-                statusEl.textContent = '✅ Камера работает';
+                statusEl.textContent = '✅ Камера работает. Выберите область анализа.';
                 areaBtn.disabled = false;
                 calibrateLowBtn.disabled = false;
                 calibrateHighBtn.disabled = false;
@@ -376,94 +533,149 @@
             };
         }
 
+        // Выбор области
         function getCoords(e) {
-            const r = video.getBoundingClientRect();
-            const cx = e.touches ? e.touches[0].clientX : e.clientX;
-            const cy = e.touches ? e.touches[0].clientY : e.clientY;
-            return { x: cx - r.left, y: cy - r.top, rectWidth: r.width, rectHeight: r.height };
+            const rect = video.getBoundingClientRect();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            return {
+                x: clientX - rect.left,
+                y: clientY - rect.top,
+                rectWidth: rect.width,
+                rectHeight: rect.height
+            };
         }
-        let sx, sy;
-        function pd(e) { if(!isSelecting) return; e.preventDefault(); const p=getCoords(e); sx=p.x; sy=p.y;
-            regionSelector.style.display='block'; regionSelector.style.left=p.x+'px'; regionSelector.style.top=p.y+'px';
-            regionSelector.style.width='0px'; regionSelector.style.height='0px'; }
-        function pm(e) { if(!isSelecting||sx===undefined) return; e.preventDefault(); const p=getCoords(e);
-            regionSelector.style.left=Math.min(sx,p.x)+'px'; regionSelector.style.top=Math.min(sy,p.y)+'px';
-            regionSelector.style.width=Math.abs(p.x-sx)+'px'; regionSelector.style.height=Math.abs(p.y-sy)+'px'; }
-        function pu(e) { if(!isSelecting||sx===undefined) return; e.preventDefault(); const p=getCoords(e);
-            const scX=video.videoWidth/p.rectWidth, scY=video.videoHeight/p.rectHeight;
-            analysisRegion={ x:Math.min(sx,p.x)*scX, y:Math.min(sy,p.y)*scY, width:Math.abs(p.x-sx)*scX, height:Math.abs(p.y-sy)*scY };
-            isSelecting=false; areaBtn.textContent='🎯 Область'; removeListeners(); }
-        function addListeners() {
-            video.addEventListener('mousedown',pd); video.addEventListener('mousemove',pm); video.addEventListener('mouseup',pu);
-            video.addEventListener('touchstart',pd,{passive:false}); video.addEventListener('touchmove',pm,{passive:false}); video.addEventListener('touchend',pu);
+        let startX, startY;
+        function onPointerDown(e) {
+            if (!isSelecting) return;
+            e.preventDefault();
+            const { x, y } = getCoords(e);
+            startX = x; startY = y;
+            regionSelector.style.display = 'block';
+            regionSelector.style.left = x + 'px';
+            regionSelector.style.top = y + 'px';
+            regionSelector.style.width = '0px';
+            regionSelector.style.height = '0px';
         }
-        function removeListeners() {
-            video.removeEventListener('mousedown',pd); video.removeEventListener('mousemove',pm); video.removeEventListener('mouseup',pu);
-            video.removeEventListener('touchstart',pd); video.removeEventListener('touchmove',pm); video.removeEventListener('touchend',pu);
+        function onPointerMove(e) {
+            if (!isSelecting || startX === undefined) return;
+            e.preventDefault();
+            const { x, y } = getCoords(e);
+            regionSelector.style.left = Math.min(startX, x) + 'px';
+            regionSelector.style.top = Math.min(startY, y) + 'px';
+            regionSelector.style.width = Math.abs(x - startX) + 'px';
+            regionSelector.style.height = Math.abs(y - startY) + 'px';
+        }
+        function onPointerUp(e) {
+            if (!isSelecting || startX === undefined) return;
+            e.preventDefault();
+            const { x, y, rectWidth, rectHeight } = getCoords(e);
+            const scaleX = video.videoWidth / rectWidth;
+            const scaleY = video.videoHeight / rectHeight;
+            analysisRegion = {
+                x: Math.min(startX, x) * scaleX,
+                y: Math.min(startY, y) * scaleY,
+                width: Math.abs(x - startX) * scaleX,
+                height: Math.abs(y - startY) * scaleY
+            };
+            isSelecting = false;
+            areaBtn.textContent = '🎯 Область';
+            removeSelectionListeners();
+        }
+        function addSelectionListeners() {
+            video.addEventListener('mousedown', onPointerDown);
+            video.addEventListener('mousemove', onPointerMove);
+            video.addEventListener('mouseup', onPointerUp);
+            video.addEventListener('touchstart', onPointerDown, { passive: false });
+            video.addEventListener('touchmove', onPointerMove, { passive: false });
+            video.addEventListener('touchend', onPointerUp);
+        }
+        function removeSelectionListeners() {
+            video.removeEventListener('mousedown', onPointerDown);
+            video.removeEventListener('mousemove', onPointerMove);
+            video.removeEventListener('mouseup', onPointerUp);
+            video.removeEventListener('touchstart', onPointerDown);
+            video.removeEventListener('touchmove', onPointerMove);
+            video.removeEventListener('touchend', onPointerUp);
         }
 
         areaBtn.addEventListener('click', () => {
-            if(isSelecting) { isSelecting=false; areaBtn.textContent='🎯 Область'; regionSelector.style.display='none'; removeListeners(); return; }
-            if(!stream) return; isSelecting=true; areaBtn.textContent='✋ Отменить'; addListeners();
+            if (isSelecting) {
+                isSelecting = false;
+                areaBtn.textContent = '🎯 Область';
+                regionSelector.style.display = 'none';
+                removeSelectionListeners();
+                return;
+            }
+            if (!stream) return;
+            isSelecting = true;
+            areaBtn.textContent = '✋ Отменить';
+            addSelectionListeners();
         });
 
+        // Кнопка сброса — работает всегда
         resetBtn.addEventListener('click', () => {
-            analysisRegion=null; regionSelector.style.display='none';
-            calibrationLow=null; calibrationHigh=null; updateCalInputs();
-            statusEl.textContent='🔄 Всё сброшено';
+            analysisRegion = null;
+            regionSelector.style.display = 'none';
+            calibrationLow = null;
+            calibrationHigh = null;
+            updateCalInputs();
+            statusEl.textContent = '🔄 Сброшена область анализа и калибровка.';
         });
 
         calibrateLowBtn.addEventListener('click', () => {
-            if(!stream) return; initAudio();
-            calibrationLow=currentBrightness; updateCalInputs();
-            statusEl.textContent=`📏 Нижний предел (100%): ${calibrationLow.toFixed(1)}`;
-            if(calibrationHigh!==null && calibrationHigh>=calibrationLow)
-                statusEl.textContent+=' ⚠️ Верхний предел ярче нижнего!';
+            if (!stream) return;
+            initAudio();
+            calibrationLow = currentBrightness;
+            updateCalInputs();
+            statusEl.textContent = `📏 Нижний предел (100%): ${calibrationLow.toFixed(1)}`;
+            if (calibrationHigh !== null && calibrationHigh >= calibrationLow) {
+                statusEl.textContent += ' ⚠️ Верхний предел ярче нижнего!';
+            }
         });
 
         calibrateHighBtn.addEventListener('click', () => {
-            if(!stream) return; initAudio();
-            if(calibrationLow!==null && currentBrightness>=calibrationLow) {
-                statusEl.textContent='❌ Верхний предел не может быть ярче нижнего!'; return;
+            if (!stream) return;
+            initAudio();
+            if (calibrationLow !== null && currentBrightness >= calibrationLow) {
+                statusEl.textContent = '❌ Верхний предел не может быть ярче нижнего!';
+                return;
             }
-            calibrationHigh=currentBrightness; updateCalInputs();
-            statusEl.textContent=`⬛ Верхний предел (0%): ${calibrationHigh.toFixed(1)}`;
+            calibrationHigh = currentBrightness;
+            updateCalInputs();
+            statusEl.textContent = `⬛ Верхний предел (0%): ${calibrationHigh.toFixed(1)}`;
         });
 
-        // Ручной ввод пределов
         applyCalBtn.addEventListener('click', () => {
             initAudio();
             const lowVal = parseFloat(lowCalInput.value);
             const highVal = parseFloat(highCalInput.value);
             
-            if (!isNaN(lowVal)) {
-                calibrationLow = lowVal;
-                statusEl.textContent = `📏 Нижний предел задан вручную: ${lowVal.toFixed(1)}`;
-            }
+            if (!isNaN(lowVal)) calibrationLow = lowVal;
             if (!isNaN(highVal)) {
                 if (calibrationLow !== null && highVal >= calibrationLow) {
                     statusEl.textContent = '❌ Верхний предел не может быть ярче нижнего!';
                     return;
                 }
                 calibrationHigh = highVal;
-                statusEl.textContent = `⬛ Верхний предел задан вручную: ${highVal.toFixed(1)}`;
-            }
-            if (!isNaN(lowVal) && !isNaN(highVal) && highVal < lowVal) {
-                statusEl.textContent = '✅ Оба предела заданы вручную';
             }
             updateCalInputs();
+            statusEl.textContent = '✅ Пределы калибровки обновлены.';
         });
 
         function addHistoryRecord() {
             const now = new Date();
-            const th = parseFloat(thresholdInput.value) || 30;
-            const w = currentTransparency < th ? '⚠️' : '✅';
+            const threshold = parseFloat(thresholdInput.value) || 30;
+            const warning = currentTransparency < threshold ? '⚠️' : '✅';
             const div = document.createElement('div');
             div.className = 'history-item';
-            div.innerHTML = `<span>${now.toLocaleTimeString('ru-RU')}</span> <span style="color:#3fb950">${currentTransparency.toFixed(1)}%</span> <span>${w}</span>`;
+            div.innerHTML = `<span>${now.toLocaleTimeString('ru-RU')}</span> <span style="color:#3fb950">${currentTransparency.toFixed(1)}%</span> <span>${warning}</span>`;
             historyList.prepend(div);
         }
-        recordBtn.addEventListener('click', () => { if(!stream) return; addHistoryRecord(); });
+        recordBtn.addEventListener('click', () => {
+            if (!stream) return;
+            addHistoryRecord();
+        });
         clearHistoryBtn.addEventListener('click', () => historyList.innerHTML = '');
 
         soundToggleBtn.addEventListener('click', () => {
@@ -474,38 +686,52 @@
             soundStatusEl.textContent = soundEnabled ? 'Звук включён' : 'Звук выключен';
         });
 
+        // Анализ кадра
         function analyzeFrame() {
-            if(!stream || video.readyState < 2) { animationId = requestAnimationFrame(analyzeFrame); return; }
+            if (!stream || video.readyState < 2) {
+                animationId = requestAnimationFrame(analyzeFrame);
+                return;
+            }
             const canvas = document.createElement('canvas');
-            canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-            const ctx = canvas.getContext('2d'); ctx.drawImage(video, 0, 0);
-            
-            let img;
-            if(analysisRegion) {
-                const rx=Math.max(0,Math.min(analysisRegion.x,canvas.width-1)), ry=Math.max(0,Math.min(analysisRegion.y,canvas.height-1));
-                const rw=Math.max(1,Math.min(analysisRegion.width,canvas.width-rx)), rh=Math.max(1,Math.min(analysisRegion.height,canvas.height-ry));
-                img = ctx.getImageData(rx, ry, rw, rh);
-            } else img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            
-            const data = img.data; let total = 0;
-            for(let i=0; i<data.length; i+=4) total += 0.299*data[i] + 0.587*data[i+1] + 0.114*data[i+2];
-            currentBrightness = total / (data.length/4);
-            
-            if(calibrationLow!==null && calibrationHigh!==null && calibrationLow>calibrationHigh)
-                currentTransparency = ((currentBrightness-calibrationHigh)/(calibrationLow-calibrationHigh))*100;
-            else if(calibrationLow!==null)
-                currentTransparency = (currentBrightness/calibrationLow)*100;
-            else
-                currentTransparency = (currentBrightness/255)*100;
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0);
+
+            let imageData;
+            if (analysisRegion) {
+                const rx = Math.max(0, Math.min(analysisRegion.x, canvas.width - 1));
+                const ry = Math.max(0, Math.min(analysisRegion.y, canvas.height - 1));
+                const rw = Math.max(1, Math.min(analysisRegion.width, canvas.width - rx));
+                const rh = Math.max(1, Math.min(analysisRegion.height, canvas.height - ry));
+                imageData = ctx.getImageData(rx, ry, rw, rh);
+            } else {
+                imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            }
+
+            const data = imageData.data;
+            let totalBrightness = 0;
+            for (let i = 0; i < data.length; i += 4) {
+                totalBrightness += 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
+            }
+            currentBrightness = totalBrightness / (data.length / 4);
+
+            if (calibrationLow !== null && calibrationHigh !== null && calibrationLow > calibrationHigh) {
+                currentTransparency = ((currentBrightness - calibrationHigh) / (calibrationLow - calibrationHigh)) * 100;
+            } else if (calibrationLow !== null) {
+                currentTransparency = (currentBrightness / calibrationLow) * 100;
+            } else {
+                currentTransparency = (currentBrightness / 255) * 100;
+            }
             currentTransparency = Math.max(0, Math.min(100, currentTransparency));
-            
-            transparencyEl.textContent = currentTransparency.toFixed(1)+'%';
+
+            transparencyEl.textContent = currentTransparency.toFixed(1) + '%';
             brightnessEl.textContent = currentBrightness.toFixed(1);
-            indicatorEl.style.left = currentTransparency+'%';
-            meterFill.style.width = currentTransparency+'%';
-            
-            const threshold = parseFloat(thresholdInput.value)||30;
-            if(currentTransparency < threshold) {
+            indicatorEl.style.left = currentTransparency + '%';
+            meterFill.style.width = currentTransparency + '%';
+
+            const threshold = parseFloat(thresholdInput.value) || 30;
+            if (currentTransparency < threshold) {
                 warningMsg.textContent = '⚠️ WARNING: Прозрачность ниже порога!';
                 warningMsg.classList.add('active');
                 playCalmBeep();
@@ -513,25 +739,29 @@
                 warningMsg.textContent = '';
                 warningMsg.classList.remove('active');
             }
+
             addTrendPoint(currentTransparency);
             animationId = requestAnimationFrame(analyzeFrame);
         }
 
         function startAnalysis() {
-            if(animationId) cancelAnimationFrame(animationId);
+            if (animationId) cancelAnimationFrame(animationId);
             analyzeFrame();
         }
 
-        // Разблокировка AudioContext по первому клику/касанию
         document.addEventListener('click', initAudio, { once: true });
         document.addEventListener('touchstart', initAudio, { once: true });
 
         window.addEventListener('load', () => {
-            if(!navigator.mediaDevices?.getUserMedia) { statusEl.textContent='❌ Браузер не поддерживает камеру'; return; }
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                statusEl.textContent = '❌ Браузер не поддерживает камеру.';
+                return;
+            }
             startCamera();
         });
+
         window.addEventListener('beforeunload', () => {
-            if(stream) stream.getTracks().forEach(t=>t.stop());
+            if (stream) stream.getTracks().forEach(track => track.stop());
         });
     </script>
 </body>
