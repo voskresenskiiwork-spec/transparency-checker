@@ -60,7 +60,7 @@
         }
         button {
             flex: 1 1 auto; min-width: 80px; padding: 10px 8px; border: none; border-radius: 12px;
-            background: #3498db; color: white; font-size: 0.9rem; font-weight: 600; cursor: pointer;
+            background: #3498db; color: white; font-size: 0.85rem; font-weight: 600; cursor: pointer;
             transition: background 0.2s, transform 0.1s; touch-action: manipulation;
         }
         button:active { transform: scale(0.96); }
@@ -68,6 +68,7 @@
         .calibrate-low-btn { background: #27ae60; }
         .calibrate-high-btn { background: #7f8c8d; }
         .record-btn { background: #f39c12; }
+        .reset-cal-btn { background: #e67e22; }
         .threshold-row {
             display: flex; align-items: center; justify-content: center; gap: 10px; margin: 10px 0; flex-wrap: wrap;
         }
@@ -81,7 +82,7 @@
             background: #f8fafc; border-radius: 16px; padding: 15px; margin-top: 10px;
         }
         .meter {
-            width: 100%; height: 24px; background: linear-gradient(to right, #fff, #2c3e50);
+            width: 100%; height: 24px; background: linear-gradient(to right, #2c3e50, #fff);
             border-radius: 12px; margin: 12px 0; position: relative; overflow: hidden; border: 1px solid #ddd;
         }
         .indicator {
@@ -132,7 +133,7 @@
             <button id="resetBtn" disabled>🔄 Сброс</button>
             <button id="calibrateLowBtn" class="calibrate-low-btn" disabled>📏 Нижний предел</button>
             <button id="calibrateHighBtn" class="calibrate-high-btn" disabled>⬛ Верхний предел</button>
-            <button id="recordBtn" class="record-btn" disabled>📝 Записать</button>
+            <button id="resetCalBtn" class="reset-cal-btn" disabled>↩️ Сброс калибровки</button>
         </div>
         <div class="calibration-info">
             Нижний предел (100%): <span id="lowCalValue">—</span><br>
@@ -167,6 +168,7 @@
         const resetBtn = document.getElementById('resetBtn');
         const calibrateLowBtn = document.getElementById('calibrateLowBtn');
         const calibrateHighBtn = document.getElementById('calibrateHighBtn');
+        const resetCalBtn = document.getElementById('resetCalBtn');
         const recordBtn = document.getElementById('recordBtn');
         const transparencyEl = document.getElementById('transparencyValue');
         const brightnessEl = document.getElementById('brightnessValue');
@@ -269,6 +271,7 @@
                 areaBtn.disabled = false;
                 calibrateLowBtn.disabled = false;
                 calibrateHighBtn.disabled = false;
+                resetCalBtn.disabled = false;
                 recordBtn.disabled = false;
                 startAnalysis();
             };
@@ -358,11 +361,23 @@
             addSelectionListeners();
         });
 
+        // Кнопка "Сброс" — сбрасывает и область анализа, и калибровку
         resetBtn.addEventListener('click', () => {
             analysisRegion = null;
             regionSelector.style.display = 'none';
+            calibrationLow = null;
+            calibrationHigh = null;
+            updateCalibrationDisplay();
             resetBtn.disabled = true;
-            statusEl.textContent = '🔄 Область сброшена. Анализ по всему кадру.';
+            statusEl.textContent = '🔄 Всё сброшено: область анализа и калибровка.';
+        });
+
+        // Кнопка "Сброс калибровки" — сбрасывает только пределы
+        resetCalBtn.addEventListener('click', () => {
+            calibrationLow = null;
+            calibrationHigh = null;
+            updateCalibrationDisplay();
+            statusEl.textContent = '↩️ Калибровка сброшена.';
         });
 
         // Калибровка: нижний предел (100% прозрачность — чистая вода, белый фон)
@@ -444,11 +459,11 @@
                 currentTransparency = ((currentBrightness - calibrationHigh) / (calibrationLow - calibrationHigh)) * 100;
                 currentTransparency = Math.max(0, Math.min(100, currentTransparency));
             } else if (calibrationLow !== null) {
-                // Задан только нижний предел (старое поведение)
+                // Задан только нижний предел
                 currentTransparency = Math.min(100, (currentBrightness / calibrationLow) * 100);
                 currentTransparency = Math.max(0, currentTransparency);
             } else {
-                // Без калибровки — просто нормализуем к 255
+                // Без калибровки — нормализуем к 255
                 currentTransparency = Math.min(100, (currentBrightness / 255) * 100);
                 currentTransparency = Math.max(0, currentTransparency);
             }
