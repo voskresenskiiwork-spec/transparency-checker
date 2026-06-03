@@ -85,6 +85,7 @@
         .btn-purple { background: #2a1a3a; border-color: var(--purple); color: var(--purple); }
         .btn-yellow { background: #3a3a1a; border-color: var(--yellow); color: var(--yellow); }
         .btn-cyan { background: #1a3a3a; border-color: #56d4dd; color: #56d4dd; }
+        .btn-orange { background: #3a2a1a; border-color: var(--orange); color: var(--orange); }
         
         .sound-indicator {
             display: inline-flex; align-items: center; gap: 6px; font-size: 0.7rem;
@@ -141,6 +142,19 @@
         .value { font-weight: 700; font-size: 1.4rem; color: var(--text); }
         #statusText { font-size: 0.8rem; color: var(--text-secondary); margin-top: 6px; min-height: 1.1em; }
         
+        /* Прогресс авто-калибровки */
+        .auto-cal-progress {
+            margin: 8px 0; font-size: 0.75rem; color: var(--text-secondary);
+        }
+        .progress-bar {
+            width: 100%; height: 6px; background: var(--surface); border-radius: 3px;
+            margin: 4px 0; overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%; background: var(--orange); border-radius: 3px;
+            transition: width 0.5s ease;
+        }
+        
         .statistics {
             background: var(--surface); border-radius: 12px; padding: 10px; margin-top: 8px;
             border: 1px solid var(--border); font-size: 0.75rem; color: var(--text-secondary);
@@ -172,7 +186,6 @@
             border: 1px solid var(--border); margin-top: 10px;
         }
         
-        /* Таймер */
         .timer-row {
             display: flex; align-items: center; justify-content: center; gap: 8px;
             margin: 8px 0; color: var(--text-secondary); font-size: 0.75rem;
@@ -207,6 +220,14 @@
             <button id="snapshotBtn" class="btn-cyan" disabled>📸 Снимок</button>
             <button id="exportBtn" class="btn-yellow" disabled>📊 Экспорт</button>
             <button id="autoRecordBtn" class="btn-blue" disabled>⏱️ Авто</button>
+            <button id="autoCalBtn" class="btn-orange" disabled>🔬 Авто.калибр</button>
+        </div>
+        
+        <!-- Прогресс авто-калибровки -->
+        <div class="auto-cal-progress" id="autoCalProgress" style="display:none;">
+            <span id="autoCalPhase">Фаза: нижний предел</span>
+            <span id="autoCalTimer" style="margin-left:10px;">00:00</span>
+            <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
         </div>
         
         <div class="sound-indicator">
@@ -285,6 +306,7 @@
         const snapshotBtn = document.getElementById('snapshotBtn');
         const exportBtn = document.getElementById('exportBtn');
         const autoRecordBtn = document.getElementById('autoRecordBtn');
+        const autoCalBtn = document.getElementById('autoCalBtn');
         const stopAutoBtn = document.getElementById('stopAutoBtn');
         const transparencyEl = document.getElementById('transparencyValue');
         const brightnessEl = document.getElementById('brightnessValue');
@@ -311,6 +333,10 @@
         const statMin = document.getElementById('statMin');
         const statMax = document.getElementById('statMax');
         const statCount = document.getElementById('statCount');
+        const autoCalProgress = document.getElementById('autoCalProgress');
+        const autoCalPhase = document.getElementById('autoCalPhase');
+        const autoCalTimer = document.getElementById('autoCalTimer');
+        const progressFill = document.getElementById('progressFill');
 
         // ===== Состояние =====
         let stream = null, analysisRegion = null, isSelecting = false, animationId = null;
@@ -318,7 +344,113 @@
         let currentTransparency = 0, currentBrightness = 0, trendData = [];
         let audioCtx = null, soundEnabled = true, lastBeepTime = 0, beepInterval = 2000;
         let autoRecordTimer = null, autoRecordSeconds = 0;
-        let historyRecords = []; // массив для статистики и экспорта
+        let historyRecords = [];
+
+        // ===== Авто-калибровка =====
+        let autoCalibration = {
+            active: false,
+            phase: 'low', // 'low' или 'high'
+            startTime: 0,
+            totalDuration: 20 * 60 * 1000, // 20 минут
+            lowPhaseDuration: 60 * 1000, // 1 минута на нижний предел
+            highPhaseStart: 60 * 1000, // верхний предел начинается через минуту
+            timer: null,
+            updateInterval: null,
+            elapsedSeconds: 0
+        };
+
+        function startAutoCalibration() {
+            if (autoCalibration.active) {
+                stopAutoCalibration();
+                return;
+            }
+            if (!stream) return;
+            
+            autoCalibration.active = true;
+            autoCalibration.phase = 'low';
+            autoCalibration.startTime = Date.now();
+            autoCalibration.elapsedSeconds = 0;
+            
+            autoCalBtn.textContent = '⏹️ Стоп калибр';
+            autoCalProgress.style.display = 'block';
+            autoCalPhase.textContent = 'Фаза: сбор нижнего предела (100%)';
+            progressFill.style.width = '0%';
+            
+            // Сразу берём текущее значение как начальный нижний предел
+            calibrationLow = currentBrightness;
+            updateCalInputs();
+            
+            autoCalibration.updateInterval = setInterval(() => {
+                const elapsed = Date.now() - autoCalibration.startTime;
+                autoCalibration.elapsedSeconds = Math.floor(elapsed / 1000);
+                const minutes = Math.floor(autoCalibration.elapsedSeconds / 60);
+                const seconds = autoCalibration.elapsedSeconds % 60;
+                autoCalTimer.textContent = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+                
+                const progress = Math.min(100, (elapsed / autoCalibration.totalDuration) * 100);
+                progressFill.style.width = progress + '%';
+                
+                if (elapsed < autoCalibration.highPhaseStart) {
+                    // Фаза нижнего предела (первые 60 секунд)
+                    autoCalibration.phase = 'low';
+                    autoCalPhase.textContent = 'Фаза: сбор нижнего предела (100%)';
+                    
+                    // Каждые 5 секунд проверяем, не ярче ли стало
+                    if (autoCalibration.elapsedSeconds >= 5 && autoCalibration.elapsedSeconds % 5 === 0) {
+                        if (currentBrightness > calibrationLow) {
+                            calibrationLow = currentBrightness;
+                            updateCalInputs();
+                            logAutoCalibration('📏 Новый нижний предел: ' + calibrationLow.toFixed(1));
+                        }
+                    }
+                } else {
+                    // Фаза верхнего предела
+                    if (autoCalibration.phase === 'low') {
+                        // Переход к верхнему пределу
+                        autoCalibration.phase = 'high';
+                        calibrationHigh = currentBrightness;
+                        updateCalInputs();
+                        logAutoCalibration('⬛ Начало сбора верхнего предела: ' + calibrationHigh.toFixed(1));
+                    }
+                    autoCalPhase.textContent = 'Фаза: сбор верхнего предела (0%)';
+                    
+                    // Каждые 5 секунд проверяем, не темнее ли стало
+                    if (autoCalibration.elapsedSeconds % 5 === 0) {
+                        if (currentBrightness < calibrationHigh && currentBrightness < calibrationLow) {
+                            calibrationHigh = currentBrightness;
+                            updateCalInputs();
+                            logAutoCalibration('⬛ Новый верхний предел: ' + calibrationHigh.toFixed(1));
+                        }
+                    }
+                }
+                
+                // Проверка на завершение
+                if (elapsed >= autoCalibration.totalDuration) {
+                    stopAutoCalibration();
+                    statusEl.textContent = '🔬 Авто-калибровка завершена!';
+                }
+            }, 1000);
+            
+            statusEl.textContent = '🔬 Авто-калибровка запущена (20 мин)';
+        }
+
+        function stopAutoCalibration() {
+            autoCalibration.active = false;
+            if (autoCalibration.updateInterval) clearInterval(autoCalibration.updateInterval);
+            autoCalibration.updateInterval = null;
+            autoCalBtn.textContent = '🔬 Авто.калибр';
+            autoCalProgress.style.display = 'none';
+            logAutoCalibration('⏹️ Авто-калибровка остановлена');
+        }
+
+        function logAutoCalibration(message) {
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('ru-RU');
+            const div = document.createElement('div');
+            div.className = 'history-item';
+            div.innerHTML = `<span class="time">${timeStr}</span> <span style="color:var(--orange)">🔬 ${message}</span>`;
+            historyList.prepend(div);
+        }
 
         // ===== Аудио =====
         function initAudio() {
@@ -350,7 +482,6 @@
             beepInterval = Math.max(800, 3000 - (currentTransparency * 30));
         }
 
-        // ===== Дата/время =====
         function updateDateTime() {
             datetimeEl.textContent = new Date().toLocaleString('ru-RU', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit' });
         }
@@ -362,24 +493,18 @@
             highCalInput.value = calibrationHigh !== null ? calibrationHigh.toFixed(1) : '';
         }
 
-        // ===== Статистика =====
         function updateStatistics() {
             if (historyRecords.length === 0) {
-                statAvg.textContent = '—';
-                statMin.textContent = '—';
-                statMax.textContent = '—';
-                statCount.textContent = '0';
+                statAvg.textContent = '—'; statMin.textContent = '—'; statMax.textContent = '—'; statCount.textContent = '0';
                 return;
             }
             const values = historyRecords.map(r => r.transparency);
-            const sum = values.reduce((a, b) => a + b, 0);
-            statAvg.textContent = (sum / values.length).toFixed(1) + '%';
-            statMin.textContent = Math.min(...values).toFixed(1) + '%';
-            statMax.textContent = Math.max(...values).toFixed(1) + '%';
+            statAvg.textContent = (values.reduce((a,b)=>a+b,0)/values.length).toFixed(1)+'%';
+            statMin.textContent = Math.min(...values).toFixed(1)+'%';
+            statMax.textContent = Math.max(...values).toFixed(1)+'%';
             statCount.textContent = values.length;
         }
 
-        // ===== График =====
         function drawTrend() {
             ctxTrend.clearRect(0, 0, trendCanvas.width, trendCanvas.height);
             ctxTrend.fillStyle = '#282c34';
@@ -412,7 +537,6 @@
             drawTrend();
         }
 
-        // ===== Камера =====
         async function startCamera() {
             try {
                 stream = await navigator.mediaDevices.getUserMedia({
@@ -435,12 +559,12 @@
                 snapshotBtn.disabled = false;
                 exportBtn.disabled = false;
                 autoRecordBtn.disabled = false;
+                autoCalBtn.disabled = false;
                 resetBtn.disabled = false;
                 startAnalysis();
             };
         }
 
-        // ===== Выбор области =====
         function getCoords(e) {
             const r = video.getBoundingClientRect();
             const cx = e.touches ? e.touches[0].clientX : e.clientX;
@@ -472,13 +596,13 @@
             if(!stream) return; isSelecting=true; areaBtn.textContent='✋ Отменить'; addListeners();
         });
 
-        // ===== Кнопки =====
         resetBtn.addEventListener('click', () => {
             analysisRegion = null;
             regionSelector.style.display = 'none';
             calibrationLow = null;
             calibrationHigh = null;
             updateCalInputs();
+            if (autoCalibration.active) stopAutoCalibration();
             statusEl.textContent = '🔄 Область и калибровка сброшены';
         });
 
@@ -512,7 +636,6 @@
             statusEl.textContent = '✅ Пределы обновлены';
         });
 
-        // ===== Запись в историю =====
         function addHistoryRecord() {
             const now = new Date();
             const timeStr = now.toLocaleTimeString('ru-RU');
@@ -522,15 +645,9 @@
             const lowStr = calibrationLow !== null ? calibrationLow.toFixed(1) : '—';
             const highStr = calibrationHigh !== null ? calibrationHigh.toFixed(1) : '—';
             
-            // Сохраняем для статистики и экспорта
             historyRecords.push({
-                date: dateStr,
-                time: timeStr,
-                transparency: currentTransparency,
-                brightness: currentBrightness,
-                lowLimit: calibrationLow,
-                highLimit: calibrationHigh,
-                warning: warning
+                date: dateStr, time: timeStr, transparency: currentTransparency,
+                brightness: currentBrightness, lowLimit: calibrationLow, highLimit: calibrationHigh, warning: warning
             });
             
             const div = document.createElement('div');
@@ -552,87 +669,58 @@
         recordBtn.addEventListener('click', () => { if(!stream) return; addHistoryRecord(); });
         clearHistoryBtn.addEventListener('click', () => { historyList.innerHTML = ''; historyRecords = []; updateStatistics(); });
 
-        // ===== Снимок =====
         snapshotBtn.addEventListener('click', () => {
             if(!stream) return;
             const canvas = document.createElement('canvas');
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(video, 0, 0);
-            
-            // Накладываем данные
-            ctx.fillStyle = 'rgba(0,0,0,0.6)';
-            ctx.fillRect(0, 0, canvas.width, 60);
-            ctx.fillStyle = '#3fb950';
-            ctx.font = 'bold 24px sans-serif';
+            canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d'); ctx.drawImage(video, 0, 0);
+            ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0, 0, canvas.width, 60);
+            ctx.fillStyle = '#3fb950'; ctx.font = 'bold 24px sans-serif';
             ctx.fillText('Прозрачность: ' + currentTransparency.toFixed(1) + '%', 20, 40);
-            
             const link = document.createElement('a');
             link.download = 'transparency_' + new Date().toISOString().slice(0,19).replace(/:/g,'-') + '.png';
-            link.href = canvas.toDataURL('image/png');
-            link.click();
+            link.href = canvas.toDataURL('image/png'); link.click();
             statusEl.textContent = '📸 Снимок сохранён';
         });
 
-        // ===== Экспорт CSV =====
         exportBtn.addEventListener('click', () => {
-            if(historyRecords.length === 0) {
-                statusEl.textContent = '❌ Нет данных для экспорта';
-                return;
-            }
+            if(historyRecords.length === 0) { statusEl.textContent = '❌ Нет данных'; return; }
             let csv = 'Дата;Время;Прозрачность(%);Яркость;Нижний предел;Верхний предел;Статус\n';
             historyRecords.forEach(r => {
-                csv += `${r.date};${r.time};${r.transparency.toFixed(1)};${r.brightness.toFixed(1)};${r.lowLimit !== null ? r.lowLimit.toFixed(1) : '—'};${r.highLimit !== null ? r.highLimit.toFixed(1) : '—'};${r.warning ? 'WARNING' : 'Норма'}\n`;
+                csv += `${r.date};${r.time};${r.transparency.toFixed(1)};${r.brightness.toFixed(1)};${r.lowLimit!==null?r.lowLimit.toFixed(1):'—'};${r.highLimit!==null?r.highLimit.toFixed(1):'—'};${r.warning?'WARNING':'Норма'}\n`;
             });
-            const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+            const blob = new Blob(['\uFEFF'+csv], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement('a');
-            link.download = 'transparency_data_' + new Date().toISOString().slice(0,10) + '.csv';
-            link.href = URL.createObjectURL(blob);
-            link.click();
-            statusEl.textContent = '📊 Экспорт выполнен (' + historyRecords.length + ' записей)';
+            link.download = 'transparency_data_'+new Date().toISOString().slice(0,10)+'.csv';
+            link.href = URL.createObjectURL(blob); link.click();
+            statusEl.textContent = '📊 Экспорт выполнен ('+historyRecords.length+' записей)';
         });
 
-        // ===== Авто-запись =====
         autoRecordBtn.addEventListener('click', () => {
             if(autoRecordTimer) {
-                clearInterval(autoRecordTimer);
-                autoRecordTimer = null;
-                timerRow.style.display = 'none';
-                autoRecordBtn.textContent = '⏱️ Авто';
-                statusEl.textContent = 'Авто-запись остановлена';
-                return;
+                clearInterval(autoRecordTimer); autoRecordTimer = null;
+                timerRow.style.display = 'none'; autoRecordBtn.textContent = '⏱️ Авто';
+                statusEl.textContent = 'Авто-запись остановлена'; return;
             }
             const interval = parseInt(timerInterval.value) || 5;
-            timerRow.style.display = 'flex';
-            autoRecordBtn.textContent = '⏸️ Стоп';
-            autoRecordSeconds = interval;
-            timerCountdown.textContent = autoRecordSeconds + ' сек';
-            
+            timerRow.style.display = 'flex'; autoRecordBtn.textContent = '⏸️ Стоп';
+            autoRecordSeconds = interval; timerCountdown.textContent = autoRecordSeconds + ' сек';
             const countdownInterval = setInterval(() => {
                 autoRecordSeconds--;
                 timerCountdown.textContent = autoRecordSeconds > 0 ? autoRecordSeconds + ' сек' : 'Запись!';
                 if(autoRecordSeconds <= 0) autoRecordSeconds = interval;
             }, 1000);
-            
-            autoRecordTimer = setInterval(() => {
-                if(!stream) return;
-                addHistoryRecord();
-            }, interval * 1000);
-            
+            autoRecordTimer = setInterval(() => { if(!stream) return; addHistoryRecord(); }, interval * 1000);
             stopAutoBtn.onclick = () => {
-                clearInterval(autoRecordTimer);
-                clearInterval(countdownInterval);
-                autoRecordTimer = null;
-                timerRow.style.display = 'none';
-                autoRecordBtn.textContent = '⏱️ Авто';
-                statusEl.textContent = 'Авто-запись остановлена';
+                clearInterval(autoRecordTimer); clearInterval(countdownInterval);
+                autoRecordTimer = null; timerRow.style.display = 'none';
+                autoRecordBtn.textContent = '⏱️ Авто'; statusEl.textContent = 'Авто-запись остановлена';
             };
-            
             statusEl.textContent = '⏱️ Авто-запись каждые ' + interval + ' сек';
         });
 
-        // ===== Звук =====
+        autoCalBtn.addEventListener('click', startAutoCalibration);
+
         soundToggleBtn.addEventListener('click', () => {
             initAudio();
             soundEnabled = !soundEnabled;
@@ -641,7 +729,6 @@
             soundStatusEl.textContent = soundEnabled ? 'Звук включён' : 'Звук выключен';
         });
 
-        // ===== Анализ кадра =====
         function analyzeFrame() {
             if(!stream || video.readyState < 2) { animationId = requestAnimationFrame(analyzeFrame); return; }
             const canvas = document.createElement('canvas');
@@ -670,19 +757,14 @@
             const threshold = parseFloat(thresholdInput.value)||30;
             if(currentTransparency < threshold) {
                 warningMsg.textContent = '⚠️ WARNING: Прозрачность ниже порога!';
-                warningMsg.classList.add('active');
-                playCalmBeep();
-            } else {
-                warningMsg.textContent = '';
-                warningMsg.classList.remove('active');
-            }
+                warningMsg.classList.add('active'); playCalmBeep();
+            } else { warningMsg.textContent = ''; warningMsg.classList.remove('active'); }
             addTrendPoint(currentTransparency);
             animationId = requestAnimationFrame(analyzeFrame);
         }
 
         function startAnalysis() { if(animationId) cancelAnimationFrame(animationId); analyzeFrame(); }
 
-        // ===== Инициализация =====
         document.addEventListener('click', initAudio, { once: true });
         document.addEventListener('touchstart', initAudio, { once: true });
 
@@ -693,6 +775,7 @@
         window.addEventListener('beforeunload', () => {
             if(stream) stream.getTracks().forEach(t=>t.stop());
             if(autoRecordTimer) clearInterval(autoRecordTimer);
+            if(autoCalibration.active) stopAutoCalibration();
         });
     </script>
 </body>
