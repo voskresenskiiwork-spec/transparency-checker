@@ -142,7 +142,6 @@
         .value { font-weight: 700; font-size: 1.4rem; color: var(--text); }
         #statusText { font-size: 0.8rem; color: var(--text-secondary); margin-top: 6px; min-height: 1.1em; }
         
-        /* Прогресс авто-калибровки */
         .auto-cal-progress {
             margin: 8px 0; font-size: 0.75rem; color: var(--text-secondary);
         }
@@ -225,7 +224,7 @@
         
         <!-- Прогресс авто-калибровки -->
         <div class="auto-cal-progress" id="autoCalProgress" style="display:none;">
-            <span id="autoCalPhase">Фаза: нижний предел</span>
+            <span id="autoCalPhase">⚡ Авто-калибровка активна</span>
             <span id="autoCalTimer" style="margin-left:10px;">00:00</span>
             <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
         </div>
@@ -346,17 +345,19 @@
         let autoRecordTimer = null, autoRecordSeconds = 0;
         let historyRecords = [];
 
-        // ===== Авто-калибровка =====
+        // ===== Авто-калибровка (новая логика) =====
+        // Нижний предел обновляется ПОСТОЯННО (каждые 5 секунд), если яркость стала ВЫШЕ (светлее)
+        // Верхний предел обновляется ПОСТОЯННО (каждые 5 секунд), если яркость стала НИЖЕ (темнее)
+        // Общая длительность: 20 минут, после чего авто-калибровка останавливается
         let autoCalibration = {
             active: false,
-            phase: 'low', // 'low' или 'high'
             startTime: 0,
             totalDuration: 20 * 60 * 1000, // 20 минут
-            lowPhaseDuration: 60 * 1000, // 1 минута на нижний предел
-            highPhaseStart: 60 * 1000, // верхний предел начинается через минуту
             timer: null,
             updateInterval: null,
-            elapsedSeconds: 0
+            elapsedSeconds: 0,
+            lastLowCheck: 0,  // время последней проверки нижнего предела
+            lastHighCheck: 0  // время последней проверки верхнего предела
         };
 
         function startAutoCalibration() {
@@ -367,18 +368,27 @@
             if (!stream) return;
             
             autoCalibration.active = true;
-            autoCalibration.phase = 'low';
             autoCalibration.startTime = Date.now();
             autoCalibration.elapsedSeconds = 0;
+            autoCalibration.lastLowCheck = 0;
+            autoCalibration.lastHighCheck = 0;
             
             autoCalBtn.textContent = '⏹️ Стоп калибр';
             autoCalProgress.style.display = 'block';
-            autoCalPhase.textContent = 'Фаза: сбор нижнего предела (100%)';
+            autoCalPhase.textContent = '⚡ Авто-калибровка активна';
             progressFill.style.width = '0%';
             
-            // Сразу берём текущее значение как начальный нижний предел
-            calibrationLow = currentBrightness;
-            updateCalInputs();
+            // Если пределы не заданы, берём текущие значения как начальные
+            if (calibrationLow === null) {
+                calibrationLow = currentBrightness;
+                updateCalInputs();
+                logAutoCalibration('📏 Начальный нижний предел: ' + calibrationLow.toFixed(1));
+            }
+            if (calibrationHigh === null) {
+                calibrationHigh = currentBrightness;
+                updateCalInputs();
+                logAutoCalibration('⬛ Начальный верхний предел: ' + calibrationHigh.toFixed(1));
+            }
             
             autoCalibration.updateInterval = setInterval(() => {
                 const elapsed = Date.now() - autoCalibration.startTime;
@@ -390,44 +400,27 @@
                 const progress = Math.min(100, (elapsed / autoCalibration.totalDuration) * 100);
                 progressFill.style.width = progress + '%';
                 
-                if (elapsed < autoCalibration.highPhaseStart) {
-                    // Фаза нижнего предела (первые 60 секунд)
-                    autoCalibration.phase = 'low';
-                    autoCalPhase.textContent = 'Фаза: сбор нижнего предела (100%)';
-                    
-                    // Каждые 5 секунд проверяем, не ярче ли стало
-                    if (autoCalibration.elapsedSeconds >= 5 && autoCalibration.elapsedSeconds % 5 === 0) {
-                        if (currentBrightness > calibrationLow) {
-                            calibrationLow = currentBrightness;
-                            updateCalInputs();
-                            logAutoCalibration('📏 Новый нижний предел: ' + calibrationLow.toFixed(1));
-                        }
+                // Каждые 5 секунд проверяем оба предела
+                if (autoCalibration.elapsedSeconds >= 5 && autoCalibration.elapsedSeconds % 5 === 0) {
+                    // Проверка нижнего предела: если яркость стала ВЫШЕ (светлее) — обновляем
+                    if (currentBrightness > calibrationLow) {
+                        calibrationLow = currentBrightness;
+                        updateCalInputs();
+                        logAutoCalibration('📏 Новый нижний предел (ярче): ' + calibrationLow.toFixed(1));
                     }
-                } else {
-                    // Фаза верхнего предела
-                    if (autoCalibration.phase === 'low') {
-                        // Переход к верхнему пределу
-                        autoCalibration.phase = 'high';
+                    
+                    // Проверка верхнего предела: если яркость стала НИЖЕ (темнее) — обновляем
+                    if (calibrationLow !== null && currentBrightness < calibrationHigh && currentBrightness < calibrationLow) {
                         calibrationHigh = currentBrightness;
                         updateCalInputs();
-                        logAutoCalibration('⬛ Начало сбора верхнего предела: ' + calibrationHigh.toFixed(1));
-                    }
-                    autoCalPhase.textContent = 'Фаза: сбор верхнего предела (0%)';
-                    
-                    // Каждые 5 секунд проверяем, не темнее ли стало
-                    if (autoCalibration.elapsedSeconds % 5 === 0) {
-                        if (currentBrightness < calibrationHigh && currentBrightness < calibrationLow) {
-                            calibrationHigh = currentBrightness;
-                            updateCalInputs();
-                            logAutoCalibration('⬛ Новый верхний предел: ' + calibrationHigh.toFixed(1));
-                        }
+                        logAutoCalibration('⬛ Новый верхний предел (темнее): ' + calibrationHigh.toFixed(1));
                     }
                 }
                 
-                // Проверка на завершение
+                // Проверка на завершение по времени
                 if (elapsed >= autoCalibration.totalDuration) {
                     stopAutoCalibration();
-                    statusEl.textContent = '🔬 Авто-калибровка завершена!';
+                    statusEl.textContent = '🔬 Авто-калибровка завершена (20 мин)';
                 }
             }, 1000);
             
