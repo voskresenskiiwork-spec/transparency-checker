@@ -60,7 +60,9 @@
         #themeToggleBtn {
             background: var(--surface); border: 1px solid var(--border); color: var(--text);
             padding: 8px 12px; border-radius: 20px; cursor: pointer; font-size: 0.8rem;
+            transition: all 0.2s;
         }
+        #themeToggleBtn:hover { opacity: 0.8; }
         
         .video-wrapper {
             position: relative;
@@ -75,7 +77,6 @@
         }
         video { width: 100%; height: 100%; object-fit: cover; display: block; }
         
-        /* Оверлей с графиком на видео */
         .video-overlay {
             position: absolute;
             bottom: 0;
@@ -143,6 +144,16 @@
         .light-theme .btn-yellow { background: #fff3cd; color: #856404; }
         .light-theme .btn-cyan { background: #d1ecf1; color: #0c5460; }
         .light-theme .btn-orange { background: #ffe5d0; color: #a04000; }
+        
+        .sound-indicator {
+            display: inline-flex; align-items: center; gap: 6px; font-size: 0.7rem;
+            color: var(--text-secondary); margin: 2px 0 6px;
+        }
+        .sound-dot {
+            width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite;
+        }
+        .sound-dot.muted { background: var(--red); animation: none; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
         
         .calibration-inputs {
             display: flex; gap: 8px; justify-content: center; align-items: center;
@@ -220,6 +231,10 @@
             margin-bottom: 4px; color: var(--text-secondary); border: 1px solid transparent;
             line-height: 1.4;
         }
+        .history-item .time { color: var(--text-secondary); font-size: 0.7rem; }
+        .history-item .transparency { color: var(--green); font-weight: 700; font-size: 0.9rem; }
+        .history-item .limits { color: var(--blue); font-size: 0.68rem; }
+        .history-item .warning-badge { font-weight: 700; }
         .clear-history {
             font-size: 0.7rem; color: var(--red); cursor: pointer; background: none; border: none;
             padding: 4px 0; margin-top: 4px; opacity: 0.8;
@@ -274,12 +289,19 @@
             <button id="autoCalBtn" class="btn-orange" disabled>🔬 Авто.калибр</button>
         </div>
         
+        <!-- Прогресс авто-калибровки -->
         <div class="auto-cal-progress" id="autoCalProgress" style="display:none;">
             <span id="autoCalPhase">⚡ Авто-калибровка активна</span>
             <span id="autoCalTimer" style="margin-left:10px;">00:00</span>
             <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
         </div>
         
+        <div class="sound-indicator">
+            <div class="sound-dot" id="soundDot"></div>
+            <span id="soundStatus">Звук включён</span>
+        </div>
+        
+        <!-- Таймер авто-записи -->
         <div class="timer-row" id="timerRow" style="display:none;">
             <label>Интервал (сек):</label>
             <input type="number" id="timerInterval" value="5" min="1" max="60" step="1">
@@ -287,6 +309,7 @@
             <button id="stopAutoBtn" class="btn-red" style="flex:0 0 auto; min-width:40px;">✕</button>
         </div>
         
+        <!-- Ручной ввод пределов -->
         <div class="calibration-inputs">
             <label>Нижний (100%):</label>
             <input type="number" id="lowCalInput" placeholder="Авто" step="0.1">
@@ -295,14 +318,17 @@
             <button id="applyCalBtn" class="btn-blue" style="flex:0 0 auto; min-width:45px;">✓</button>
         </div>
         
+        <!-- Порог WARNING -->
         <div class="threshold-row">
             <label for="threshold">⚠️ Порог:</label>
             <input type="number" id="threshold" value="30" min="0" max="100" step="1">
             <span>%</span>
         </div>
         
+        <!-- Предупреждение -->
         <div id="warningMessage" class="warning-text"></div>
         
+        <!-- Результаты -->
         <div class="result-card">
             <div class="stats">
                 <span>Прозрачность <span class="value" id="transparencyValue">0%</span></span>
@@ -315,6 +341,7 @@
             <div id="statusText">Загрузка камеры...</div>
         </div>
         
+        <!-- Статистика -->
         <div class="statistics" id="statistics">
             <div class="stat-item">Среднее: <span class="stat-value" id="statAvg">—</span></div>
             <div class="stat-item">Мин: <span class="stat-value" id="statMin">—</span></div>
@@ -322,8 +349,10 @@
             <div class="stat-item">Измерений: <span class="stat-value" id="statCount">0</span></div>
         </div>
         
+        <!-- График -->
         <canvas id="trendCanvas" class="trend-canvas" width="500" height="130"></canvas>
         
+        <!-- История -->
         <div class="history" id="historyContainer">
             <h3>📋 История измерений</h3>
             <div id="historyList"></div>
@@ -397,14 +426,99 @@
         let recordingCtx = null;
         let recordingStream = null;
 
-        // ===== Авто-калибровка =====
+        // ===== Авто-калибровка (исправлена) =====
         let autoCalibration = {
             active: false,
             startTime: 0,
-            totalDuration: 20 * 60 * 1000,
-            updateInterval: null,
+            totalDuration: 20 * 60 * 1000, // 20 минут
+            intervalId: null,
             elapsedSeconds: 0
         };
+
+        function startAutoCalibration() {
+            if (autoCalibration.active) {
+                stopAutoCalibration();
+                return;
+            }
+            if (!stream) return;
+            
+            autoCalibration.active = true;
+            autoCalibration.startTime = Date.now();
+            autoCalibration.elapsedSeconds = 0;
+            
+            autoCalBtn.textContent = '⏹️ Стоп калибр';
+            autoCalProgress.style.display = 'block';
+            autoCalPhase.textContent = '⚡ Авто-калибровка активна';
+            progressFill.style.width = '0%';
+            
+            // Если пределы не заданы, берём текущие значения как начальные
+            if (calibrationLow === null) {
+                calibrationLow = currentBrightness;
+                updateCalInputs();
+                logAutoCalibration('📏 Начальный нижний предел: ' + calibrationLow.toFixed(1));
+            }
+            if (calibrationHigh === null) {
+                calibrationHigh = currentBrightness;
+                updateCalInputs();
+                logAutoCalibration('⬛ Начальный верхний предел: ' + calibrationHigh.toFixed(1));
+            }
+            
+            autoCalibration.intervalId = setInterval(() => {
+                const elapsed = Date.now() - autoCalibration.startTime;
+                autoCalibration.elapsedSeconds = Math.floor(elapsed / 1000);
+                const minutes = Math.floor(autoCalibration.elapsedSeconds / 60);
+                const seconds = autoCalibration.elapsedSeconds % 60;
+                autoCalTimer.textContent = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+                
+                const progress = Math.min(100, (elapsed / autoCalibration.totalDuration) * 100);
+                progressFill.style.width = progress + '%';
+                
+                // Каждые 5 секунд проверяем оба предела
+                if (autoCalibration.elapsedSeconds >= 5 && autoCalibration.elapsedSeconds % 5 === 0) {
+                    // Проверка нижнего предела: если яркость стала ВЫШЕ (светлее) — обновляем
+                    if (currentBrightness > calibrationLow) {
+                        calibrationLow = currentBrightness;
+                        updateCalInputs();
+                        logAutoCalibration('📏 Новый нижний предел (ярче): ' + calibrationLow.toFixed(1));
+                    }
+                    
+                    // Проверка верхнего предела: если яркость стала НИЖЕ (темнее) — обновляем
+                    if (calibrationLow !== null && currentBrightness < calibrationHigh && currentBrightness < calibrationLow) {
+                        calibrationHigh = currentBrightness;
+                        updateCalInputs();
+                        logAutoCalibration('⬛ Новый верхний предел (темнее): ' + calibrationHigh.toFixed(1));
+                    }
+                }
+                
+                // Проверка на завершение по времени
+                if (elapsed >= autoCalibration.totalDuration) {
+                    stopAutoCalibration();
+                    statusEl.textContent = '🔬 Авто-калибровка завершена (20 мин)';
+                }
+            }, 1000);
+            
+            statusEl.textContent = '🔬 Авто-калибровка запущена (20 мин)';
+        }
+
+        function stopAutoCalibration() {
+            autoCalibration.active = false;
+            if (autoCalibration.intervalId) {
+                clearInterval(autoCalibration.intervalId);
+                autoCalibration.intervalId = null;
+            }
+            autoCalBtn.textContent = '🔬 Авто.калибр';
+            autoCalProgress.style.display = 'none';
+            logAutoCalibration('⏹️ Авто-калибровка остановлена');
+        }
+
+        function logAutoCalibration(message) {
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('ru-RU');
+            const div = document.createElement('div');
+            div.className = 'history-item';
+            div.innerHTML = `<span class="time">${timeStr}</span> <span style="color:var(--orange)">🔬 ${message}</span>`;
+            historyList.prepend(div);
+        }
 
         // ===== Тема =====
         function toggleTheme() {
@@ -415,7 +529,7 @@
         }
         themeToggleBtn.addEventListener('click', toggleTheme);
 
-        // ===== Звук =====
+        // ===== Аудио =====
         function initAudio() {
             if (!audioCtx) {
                 audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -475,7 +589,6 @@
             overlayCanvas.height = 80;
             overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
             
-            // Полупрозрачный фон
             overlayCtx.fillStyle = 'rgba(0,0,0,0.5)';
             overlayCtx.fillRect(0, 0, overlayCanvas.width, overlayCanvas.height);
             
@@ -486,7 +599,6 @@
             const h = overlayCanvas.height;
             const xStep = w / (points.length - 1);
             
-            // График
             overlayCtx.beginPath();
             overlayCtx.strokeStyle = '#3fb950';
             overlayCtx.lineWidth = 2;
@@ -498,7 +610,6 @@
             }
             overlayCtx.stroke();
             
-            // Текущее значение
             overlayCtx.fillStyle = '#3fb950';
             overlayCtx.font = 'bold 14px sans-serif';
             overlayCtx.fillText(`${currentTransparency.toFixed(1)}%`, 10, 20);
@@ -529,7 +640,7 @@
             ctxTrend.setLineDash([6, 4]); ctxTrend.moveTo(0, yTh); ctxTrend.lineTo(w, yTh);
             ctxTrend.stroke(); ctxTrend.setLineDash([]);
             
-            // Обновляем оверлей
+            // Обновляем оверлей на видео
             drawVideoOverlay();
         }
 
@@ -569,6 +680,7 @@
             };
         }
 
+        // ===== Выбор области =====
         function getCoords(e) {
             const r = video.getBoundingClientRect();
             const cx = e.touches ? e.touches[0].clientX : e.clientX;
@@ -640,6 +752,93 @@
             statusEl.textContent = '✅ Пределы обновлены';
         });
 
+        // ===== История =====
+        function addHistoryRecord() {
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('ru-RU');
+            const dateStr = now.toLocaleDateString('ru-RU');
+            const threshold = parseFloat(thresholdInput.value) || 30;
+            const warning = currentTransparency < threshold;
+            const lowStr = calibrationLow !== null ? calibrationLow.toFixed(1) : '—';
+            const highStr = calibrationHigh !== null ? calibrationHigh.toFixed(1) : '—';
+            
+            historyRecords.push({
+                date: dateStr, time: timeStr, transparency: currentTransparency,
+                brightness: currentBrightness, lowLimit: calibrationLow, highLimit: calibrationHigh, warning: warning
+            });
+            
+            const div = document.createElement('div');
+            div.className = 'history-item';
+            div.innerHTML = `
+                <div style="display:flex; justify-content:space-between;">
+                    <span class="time">${dateStr} ${timeStr}</span>
+                    <span class="warning-badge" style="color:${warning ? 'var(--red)' : 'var(--green)'}">${warning ? '⚠️' : '✅'}</span>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-top:2px;">
+                    <span class="transparency">${currentTransparency.toFixed(1)}%</span>
+                    <span class="limits">Пределы: ${lowStr} / ${highStr}</span>
+                </div>
+            `;
+            historyList.prepend(div);
+            updateStatistics();
+        }
+        
+        recordBtn.addEventListener('click', () => { if(!stream) return; addHistoryRecord(); });
+        clearHistoryBtn.addEventListener('click', () => { historyList.innerHTML = ''; historyRecords = []; updateStatistics(); });
+
+        // ===== Снимок =====
+        snapshotBtn.addEventListener('click', () => {
+            if(!stream) return;
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d'); ctx.drawImage(video, 0, 0);
+            ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0, 0, canvas.width, 60);
+            ctx.fillStyle = '#3fb950'; ctx.font = 'bold 24px sans-serif';
+            ctx.fillText('Прозрачность: ' + currentTransparency.toFixed(1) + '%', 20, 40);
+            const link = document.createElement('a');
+            link.download = 'transparency_' + new Date().toISOString().slice(0,19).replace(/:/g,'-') + '.png';
+            link.href = canvas.toDataURL('image/png'); link.click();
+            statusEl.textContent = '📸 Снимок сохранён';
+        });
+
+        // ===== Экспорт =====
+        exportBtn.addEventListener('click', () => {
+            if(historyRecords.length === 0) { statusEl.textContent = '❌ Нет данных'; return; }
+            let csv = 'Дата;Время;Прозрачность(%);Яркость;Нижний предел;Верхний предел;Статус\n';
+            historyRecords.forEach(r => {
+                csv += `${r.date};${r.time};${r.transparency.toFixed(1)};${r.brightness.toFixed(1)};${r.lowLimit!==null?r.lowLimit.toFixed(1):'—'};${r.highLimit!==null?r.highLimit.toFixed(1):'—'};${r.warning?'WARNING':'Норма'}\n`;
+            });
+            const blob = new Blob(['\uFEFF'+csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.download = 'transparency_data_'+new Date().toISOString().slice(0,10)+'.csv';
+            link.href = URL.createObjectURL(blob); link.click();
+            statusEl.textContent = '📊 Экспорт выполнен ('+historyRecords.length+' записей)';
+        });
+
+        // ===== Авто-запись =====
+        autoRecordBtn.addEventListener('click', () => {
+            if(autoRecordTimer) {
+                clearInterval(autoRecordTimer); autoRecordTimer = null;
+                timerRow.style.display = 'none'; autoRecordBtn.textContent = '⏱️ Авто';
+                statusEl.textContent = 'Авто-запись остановлена'; return;
+            }
+            const interval = parseInt(timerInterval.value) || 5;
+            timerRow.style.display = 'flex'; autoRecordBtn.textContent = '⏸️ Стоп';
+            autoRecordSeconds = interval; timerCountdown.textContent = autoRecordSeconds + ' сек';
+            const countdownInterval = setInterval(() => {
+                autoRecordSeconds--;
+                timerCountdown.textContent = autoRecordSeconds > 0 ? autoRecordSeconds + ' сек' : 'Запись!';
+                if(autoRecordSeconds <= 0) autoRecordSeconds = interval;
+            }, 1000);
+            autoRecordTimer = setInterval(() => { if(!stream) return; addHistoryRecord(); }, interval * 1000);
+            stopAutoBtn.onclick = () => {
+                clearInterval(autoRecordTimer); clearInterval(countdownInterval);
+                autoRecordTimer = null; timerRow.style.display = 'none';
+                autoRecordBtn.textContent = '⏱️ Авто'; statusEl.textContent = 'Авто-запись остановлена';
+            };
+            statusEl.textContent = '⏱️ Авто-запись каждые ' + interval + ' сек';
+        });
+
         // ===== Запись видео =====
         videoRecordBtn.addEventListener('click', () => {
             if (isRecording) {
@@ -654,16 +853,13 @@
             
             recordedChunks = [];
             
-            // Создаём canvas для записи видео с оверлеем
             recordingCanvas = document.createElement('canvas');
             recordingCanvas.width = video.videoWidth || 640;
             recordingCanvas.height = video.videoHeight || 480;
             recordingCtx = recordingCanvas.getContext('2d');
             
-            // Создаём поток из canvas
             recordingStream = recordingCanvas.captureStream(30);
             
-            // Добавляем аудио-тишину (опционально)
             try {
                 mediaRecorder = new MediaRecorder(recordingStream, { mimeType: 'video/webm;codecs=vp9' });
             } catch (e) {
@@ -692,7 +888,6 @@
             recordIndicator.style.display = 'block';
             statusEl.textContent = '🎥 Запись видео...';
             
-            // Запускаем рендеринг кадров
             renderVideoFrame();
         }
 
@@ -708,14 +903,11 @@
         function renderVideoFrame() {
             if (!isRecording || !recordingCtx || !recordingCanvas) return;
             
-            // Рисуем видео
             recordingCtx.drawImage(video, 0, 0, recordingCanvas.width, recordingCanvas.height);
             
-            // Рисуем оверлей с графиком
             const h = recordingCanvas.height;
             const w = recordingCanvas.width;
             
-            // Полупрозрачный фон
             recordingCtx.fillStyle = 'rgba(0,0,0,0.5)';
             recordingCtx.fillRect(0, h - 80, w, 80);
             
@@ -735,172 +927,12 @@
                 recordingCtx.stroke();
             }
             
-            // Текущее значение
             recordingCtx.fillStyle = '#3fb950';
             recordingCtx.font = 'bold 14px sans-serif';
             recordingCtx.fillText(`${currentTransparency.toFixed(1)}%`, 10, h - 55);
             
             requestAnimationFrame(renderVideoFrame);
         }
-
-        // ===== История =====
-        function addHistoryRecord() {
-            const now = new Date();
-            const timeStr = now.toLocaleTimeString('ru-RU');
-            const dateStr = now.toLocaleDateString('ru-RU');
-            const threshold = parseFloat(thresholdInput.value) || 30;
-            const warning = currentTransparency < threshold;
-            const lowStr = calibrationLow !== null ? calibrationLow.toFixed(1) : '—';
-            const highStr = calibrationHigh !== null ? calibrationHigh.toFixed(1) : '—';
-            
-            historyRecords.push({
-                date: dateStr, time: timeStr, transparency: currentTransparency,
-                brightness: currentBrightness, lowLimit: calibrationLow, highLimit: calibrationHigh, warning: warning
-            });
-            
-            const div = document.createElement('div');
-            div.className = 'history-item';
-            div.innerHTML = `
-                <div style="display:flex; justify-content:space-between;">
-                    <span class="time">${dateStr} ${timeStr}</span>
-                    <span style="color:${warning ? 'var(--red)' : 'var(--green)'}">${warning ? '⚠️' : '✅'}</span>
-                </div>
-                <div style="display:flex; justify-content:space-between; margin-top:2px;">
-                    <span style="color:var(--green); font-weight:700;">${currentTransparency.toFixed(1)}%</span>
-                    <span style="color:var(--blue); font-size:0.68rem;">Пределы: ${lowStr} / ${highStr}</span>
-                </div>
-            `;
-            historyList.prepend(div);
-            updateStatistics();
-        }
-        
-        recordBtn.addEventListener('click', () => { if(!stream) return; addHistoryRecord(); });
-        clearHistoryBtn.addEventListener('click', () => { historyList.innerHTML = ''; historyRecords = []; updateStatistics(); });
-
-        // ===== Снимок =====
-        snapshotBtn.addEventListener('click', () => {
-            if(!stream) return;
-            const canvas = document.createElement('canvas');
-            canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-            const ctx = canvas.getContext('2d'); ctx.drawImage(video, 0, 0);
-            ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0, 0, canvas.width, 60);
-            ctx.fillStyle = '#3fb950'; ctx.font = 'bold 24px sans-serif';
-            ctx.fillText('Прозрачность: ' + currentTransparency.toFixed(1) + '%', 20, 40);
-            const link = document.createElement('a');
-            link.download = 'snapshot_' + new Date().toISOString().slice(0,19).replace(/:/g,'-') + '.png';
-            link.href = canvas.toDataURL('image/png'); link.click();
-            statusEl.textContent = '📸 Снимок сохранён';
-        });
-
-        // ===== Экспорт =====
-        exportBtn.addEventListener('click', () => {
-            if(historyRecords.length === 0) { statusEl.textContent = '❌ Нет данных'; return; }
-            let csv = 'Дата;Время;Прозрачность(%);Яркость;Нижний предел;Верхний предел;Статус\n';
-            historyRecords.forEach(r => {
-                csv += `${r.date};${r.time};${r.transparency.toFixed(1)};${r.brightness.toFixed(1)};${r.lowLimit!==null?r.lowLimit.toFixed(1):'—'};${r.highLimit!==null?r.highLimit.toFixed(1):'—'};${r.warning?'WARNING':'Норма'}\n`;
-            });
-            const blob = new Blob(['\uFEFF'+csv], { type: 'text/csv;charset=utf-8;' });
-            const link = document.createElement('a');
-            link.download = 'data_' + new Date().toISOString().slice(0,10) + '.csv';
-            link.href = URL.createObjectURL(blob); link.click();
-            statusEl.textContent = '📊 Экспорт (' + historyRecords.length + ' записей)';
-        });
-
-        // ===== Авто-запись =====
-        autoRecordBtn.addEventListener('click', () => {
-            if(autoRecordTimer) {
-                clearInterval(autoRecordTimer); autoRecordTimer = null;
-                timerRow.style.display = 'none'; autoRecordBtn.textContent = '⏱️ Авто';
-                statusEl.textContent = 'Авто-запись остановлена'; return;
-            }
-            const interval = parseInt(timerInterval.value) || 5;
-            timerRow.style.display = 'flex'; autoRecordBtn.textContent = '⏸️ Стоп';
-            autoRecordSeconds = interval; timerCountdown.textContent = autoRecordSeconds + ' сек';
-            const ci = setInterval(() => {
-                autoRecordSeconds--;
-                timerCountdown.textContent = autoRecordSeconds > 0 ? autoRecordSeconds + ' сек' : 'Запись!';
-                if(autoRecordSeconds <= 0) autoRecordSeconds = interval;
-            }, 1000);
-            autoRecordTimer = setInterval(() => { if(!stream) return; addHistoryRecord(); }, interval * 1000);
-            stopAutoBtn.onclick = () => {
-                clearInterval(autoRecordTimer); clearInterval(ci);
-                autoRecordTimer = null; timerRow.style.display = 'none';
-                autoRecordBtn.textContent = '⏱️ Авто'; statusEl.textContent = 'Авто-запись остановлена';
-            };
-            statusEl.textContent = '⏱️ Авто-запись каждые ' + interval + ' сек';
-        });
-
-        // ===== Авто-калибровка =====
-        function startAutoCalibration() {
-            if (autoCalibration.active) { stopAutoCalibration(); return; }
-            if (!stream) return;
-            
-            autoCalibration.active = true;
-            autoCalibration.startTime = Date.now();
-            autoCalibration.elapsedSeconds = 0;
-            
-            autoCalBtn.textContent = '⏹️ Стоп калибр';
-            autoCalProgress.style.display = 'block';
-            autoCalPhase.textContent = '⚡ Авто-калибровка активна';
-            progressFill.style.width = '0%';
-            
-            if (calibrationLow === null) {
-                calibrationLow = currentBrightness;
-                updateCalInputs();
-                logAutoCalibration('📏 Начальный нижний предел: ' + calibrationLow.toFixed(1));
-            }
-            if (calibrationHigh === null) {
-                calibrationHigh = currentBrightness;
-                updateCalInputs();
-                logAutoCalibration('⬛ Начальный верхний предел: ' + calibrationHigh.toFixed(1));
-            }
-            
-            autoCalibration.updateInterval = setInterval(() => {
-                const elapsed = Date.now() - autoCalibration.startTime;
-                autoCalibration.elapsedSeconds = Math.floor(elapsed / 1000);
-                const m = Math.floor(autoCalibration.elapsedSeconds / 60);
-                const s = autoCalibration.elapsedSeconds % 60;
-                autoCalTimer.textContent = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
-                progressFill.style.width = Math.min(100, (elapsed / autoCalibration.totalDuration) * 100) + '%';
-                
-                if (autoCalibration.elapsedSeconds >= 5 && autoCalibration.elapsedSeconds % 5 === 0) {
-                    if (currentBrightness > calibrationLow) {
-                        calibrationLow = currentBrightness;
-                        updateCalInputs();
-                        logAutoCalibration('📏 Нижний предел: ' + calibrationLow.toFixed(1));
-                    }
-                    if (calibrationLow !== null && currentBrightness < calibrationHigh && currentBrightness < calibrationLow) {
-                        calibrationHigh = currentBrightness;
-                        updateCalInputs();
-                        logAutoCalibration('⬛ Верхний предел: ' + calibrationHigh.toFixed(1));
-                    }
-                }
-                
-                if (elapsed >= autoCalibration.totalDuration) {
-                    stopAutoCalibration();
-                    statusEl.textContent = '🔬 Авто-калибровка завершена (20 мин)';
-                }
-            }, 1000);
-            
-            statusEl.textContent = '🔬 Авто-калибровка запущена (20 мин)';
-        }
-
-        function stopAutoCalibration() {
-            autoCalibration.active = false;
-            if (autoCalibration.updateInterval) clearInterval(autoCalibration.updateInterval);
-            autoCalBtn.textContent = '🔬 Авто.калибр';
-            autoCalProgress.style.display = 'none';
-            logAutoCalibration('⏹️ Авто-калибровка остановлена');
-        }
-
-        function logAutoCalibration(msg) {
-            const div = document.createElement('div');
-            div.className = 'history-item';
-            div.innerHTML = `<span class="time">${new Date().toLocaleTimeString('ru-RU')}</span> <span style="color:var(--orange)">🔬 ${msg}</span>`;
-            historyList.prepend(div);
-        }
-
-        autoCalBtn.addEventListener('click', startAutoCalibration);
 
         // ===== Звук =====
         soundToggleBtn.addEventListener('click', () => {
@@ -947,6 +979,9 @@
         }
 
         function startAnalysis() { if(animationId) cancelAnimationFrame(animationId); analyzeFrame(); }
+
+        // ===== Кнопка авто-калибровки =====
+        autoCalBtn.addEventListener('click', startAutoCalibration);
 
         document.addEventListener('click', initAudio, { once: true });
         document.addEventListener('touchstart', initAudio, { once: true });
