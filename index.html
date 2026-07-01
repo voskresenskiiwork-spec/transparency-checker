@@ -35,18 +35,14 @@
             padding: 8px 12px; border-radius: 20px; cursor: pointer; font-size: 0.8rem;
         }
         
-        .ip-camera-row {
+        .camera-select-row {
             display: flex; gap: 8px; align-items: center; justify-content: center;
             margin: 8px 0; flex-wrap: wrap;
         }
-        .ip-camera-row input {
+        .camera-select-row select {
             flex: 1 1 auto; min-width: 180px; padding: 8px 10px; border-radius: 8px;
             border: 1px solid var(--border); background: var(--surface); color: var(--text);
-            font-size: 0.85rem; text-align: left;
-        }
-        .ip-camera-row input::placeholder { color: var(--text-secondary); }
-        .ip-camera-row button {
-            flex: 0 0 auto; min-width: 80px; padding: 8px 12px;
+            font-size: 0.85rem;
         }
         .camera-status {
             font-size: 0.7rem; color: var(--text-secondary); margin: 4px 0;
@@ -190,18 +186,19 @@
             <button id="themeToggleBtn">☀️ Светлая</button>
         </div>
         
-        <!-- Блок IP-камеры -->
-        <div class="ip-camera-row">
-            <input type="text" id="ipCameraInput" placeholder="IP-адрес камеры (например: 192.168.1.100:8080/video)">
-            <button id="connectIpBtn" class="btn-cyan">📡 Подключить IP</button>
-            <button id="disconnectIpBtn" class="btn-red" disabled>✕ Откл.</button>
+        <!-- Выбор камеры -->
+        <div class="camera-select-row">
+            <select id="cameraSelect">
+                <option value="">Загрузка камер...</option>
+            </select>
+            <button id="refreshCamerasBtn" class="btn-cyan" style="flex:0 0 auto; min-width:40px;">🔄</button>
         </div>
         <div class="camera-status">
-            Источник: <span id="cameraSource" style="color:var(--green);font-weight:600;">встроенная камера</span>
+            Активная камера: <span id="cameraSource" style="color:var(--green);font-weight:600;">—</span>
         </div>
         
         <div class="video-wrapper" id="videoWrapper">
-            <video id="video" autoplay playsinline muted crossorigin="anonymous"></video>
+            <video id="video" autoplay playsinline muted></video>
             <div class="video-overlay"><canvas id="overlayCanvas"></canvas></div>
             <div class="region-selector" id="regionSelector"></div>
             <div class="record-indicator" id="recordIndicator"></div>
@@ -268,32 +265,31 @@
 
     <script>
         // ===== DOM =====
-        const $ = id => document.getElementById(id);
-        const video = $('video');
-        const overlayCanvas = $('overlayCanvas');
+        const video = document.getElementById('video');
+        const overlayCanvas = document.getElementById('overlayCanvas');
         const overlayCtx = overlayCanvas.getContext('2d');
-        const ipCameraInput = $('ipCameraInput');
-        const connectIpBtn = $('connectIpBtn');
-        const disconnectIpBtn = $('disconnectIpBtn');
-        const cameraSource = $('cameraSource');
-        const areaBtn = $('areaBtn'), resetBtn = $('resetBtn');
-        const calibrateLowBtn = $('calibrateLowBtn'), calibrateHighBtn = $('calibrateHighBtn');
-        const recordBtn = $('recordBtn'), soundToggleBtn = $('soundToggleBtn');
-        const snapshotBtn = $('snapshotBtn'), videoRecordBtn = $('videoRecordBtn');
-        const exportBtn = $('exportBtn'), autoRecordBtn = $('autoRecordBtn');
-        const autoCalBtn = $('autoCalBtn'), themeToggleBtn = $('themeToggleBtn');
-        const transparencyEl = $('transparencyValue'), brightnessEl = $('brightnessValue');
-        const indicatorEl = $('indicator'), meterFill = $('meterFill'), statusEl = $('statusText');
-        const regionSelector = $('regionSelector'), recordIndicator = $('recordIndicator');
-        const thresholdInput = $('threshold'), warningMsg = $('warningMessage');
-        const datetimeEl = $('datetime'), historyList = $('historyList'), clearHistoryBtn = $('clearHistoryBtn');
-        const trendCanvas = $('trendCanvas'), ctxTrend = trendCanvas.getContext('2d');
-        const lowCalInput = $('lowCalInput'), highCalInput = $('highCalInput'), applyCalBtn = $('applyCalBtn');
-        const statAvg = $('statAvg'), statMin = $('statMin'), statMax = $('statMax'), statCount = $('statCount');
-        const autoCalProgress = $('autoCalProgress'), autoCalPhase = $('autoCalPhase');
-        const autoCalTimer = $('autoCalTimer'), progressFill = $('progressFill');
-        const timerRow = $('timerRow'), timerInterval = $('timerInterval');
-        const timerCountdown = $('timerCountdown'), stopAutoBtn = $('stopAutoBtn');
+        const cameraSelect = document.getElementById('cameraSelect');
+        const refreshCamerasBtn = document.getElementById('refreshCamerasBtn');
+        const cameraSource = document.getElementById('cameraSource');
+        const areaBtn = document.getElementById('areaBtn'), resetBtn = document.getElementById('resetBtn');
+        const calibrateLowBtn = document.getElementById('calibrateLowBtn'), calibrateHighBtn = document.getElementById('calibrateHighBtn');
+        const recordBtn = document.getElementById('recordBtn'), soundToggleBtn = document.getElementById('soundToggleBtn');
+        const snapshotBtn = document.getElementById('snapshotBtn'), videoRecordBtn = document.getElementById('videoRecordBtn');
+        const exportBtn = document.getElementById('exportBtn'), autoRecordBtn = document.getElementById('autoRecordBtn');
+        const autoCalBtn = document.getElementById('autoCalBtn'), themeToggleBtn = document.getElementById('themeToggleBtn');
+        const transparencyEl = document.getElementById('transparencyValue'), brightnessEl = document.getElementById('brightnessValue');
+        const indicatorEl = document.getElementById('indicator'), meterFill = document.getElementById('meterFill'), statusEl = document.getElementById('statusText');
+        const regionSelector = document.getElementById('regionSelector'), recordIndicator = document.getElementById('recordIndicator');
+        const thresholdInput = document.getElementById('threshold'), warningMsg = document.getElementById('warningMessage');
+        const datetimeEl = document.getElementById('datetime'), historyList = document.getElementById('historyList'), clearHistoryBtn = document.getElementById('clearHistoryBtn');
+        const trendCanvas = document.getElementById('trendCanvas'), ctxTrend = trendCanvas.getContext('2d');
+        const lowCalInput = document.getElementById('lowCalInput'), highCalInput = document.getElementById('highCalInput'), applyCalBtn = document.getElementById('applyCalBtn');
+        const statAvg = document.getElementById('statAvg'), statMin = document.getElementById('statMin'), statMax = document.getElementById('statMax'), statCount = document.getElementById('statCount');
+        const autoCalProgress = document.getElementById('autoCalProgress'), autoCalPhase = document.getElementById('autoCalPhase');
+        const autoCalTimer = document.getElementById('autoCalTimer'), progressFill = document.getElementById('progressFill');
+        const timerRow = document.getElementById('timerRow'), timerInterval = document.getElementById('timerInterval');
+        const timerCountdown = document.getElementById('timerCountdown'), stopAutoBtn = document.getElementById('stopAutoBtn');
+        const soundDot = document.getElementById('soundDot'), soundStatusEl = document.getElementById('soundStatus');
 
         // ===== Состояние =====
         let stream = null, analysisRegion = null, isSelecting = false, animationId = null;
@@ -303,131 +299,66 @@
         let autoRecordTimer = null, autoRecordSeconds = 0, historyRecords = [];
         let isDarkTheme = true, mediaRecorder = null, recordedChunks = [], isRecording = false;
         let recordingCanvas = null, recordingCtx = null, recordingStream = null;
-        let currentCameraType = 'builtin';
-        let ipStream = null;
 
-        // ===== IP-камера (исправлено) =====
-        async function connectToIpCamera() {
-            const address = ipCameraInput.value.trim();
-            if (!address) {
-                statusEl.textContent = '❌ Введите IP-адрес камеры';
+        // ===== Список камер =====
+        async function getCameraList() {
+            try {
+                // Запрашиваем разрешение, чтобы получить labels
+                await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+            } catch (e) {
+                // Игнорируем ошибку
+            }
+            
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const videoDevices = devices.filter(d => d.kind === 'videoinput');
+            
+            cameraSelect.innerHTML = '';
+            
+            if (videoDevices.length === 0) {
+                cameraSelect.innerHTML = '<option value="">Камеры не найдены</option>';
                 return;
             }
-
-            statusEl.textContent = '📡 Подключение к IP-камере...';
-            connectIpBtn.disabled = true;
-
-            // Формируем URL
-            let url = address;
-            if (!url.startsWith('http://') && !url.startsWith('https://')) {
-                url = 'http://' + url;
-            }
-
-            try {
-                // Создаём временный video элемент для тестирования
-                const testVideo = document.createElement('video');
-                testVideo.crossOrigin = 'anonymous';
-                testVideo.muted = true;
-                testVideo.playsInline = true;
-                testVideo.autoplay = true;
-
-                // Пробуем загрузить видео
-                await new Promise((resolve, reject) => {
-                    const timeout = setTimeout(() => {
-                        reject(new Error('Таймаут подключения'));
-                    }, 10000);
-
-                    testVideo.onloadedmetadata = () => {
-                        clearTimeout(timeout);
-                        testVideo.play().then(resolve).catch(reject);
-                    };
-                    
-                    testVideo.onerror = () => {
-                        clearTimeout(timeout);
-                        reject(new Error('Не удалось загрузить видео'));
-                    };
-
-                    testVideo.src = url;
-                });
-
-                // Останавливаем текущую камеру
-                stopCurrentCamera();
-
-                // Создаём MediaStream из video элемента
-                if (testVideo.captureStream) {
-                    ipStream = testVideo.captureStream();
-                } else {
-                    // Fallback: захват через canvas
-                    const canvas = document.createElement('canvas');
-                    canvas.width = testVideo.videoWidth || 640;
-                    canvas.height = testVideo.videoHeight || 480;
-                    const ctx = canvas.getContext('2d');
-                    
-                    setInterval(() => {
-                        if (testVideo.readyState >= 2) {
-                            canvas.width = testVideo.videoWidth;
-                            canvas.height = testVideo.videoHeight;
-                            ctx.drawImage(testVideo, 0, 0);
-                        }
-                    }, 1000 / 30);
-                    
-                    ipStream = canvas.captureStream(30);
-                }
-
-                // Подключаем поток к основному video
-                video.srcObject = ipStream;
-                currentCameraType = 'ip';
-                cameraSource.textContent = 'IP-камера: ' + address;
-                cameraSource.style.color = 'var(--green)';
-
-                disconnectIpBtn.disabled = false;
-                connectIpBtn.disabled = false;
-                connectIpBtn.textContent = '📡 Подключить IP';
-
-                statusEl.textContent = '✅ IP-камера подключена: ' + address;
-
-                // Запускаем анализ если ещё не запущен
-                if (!animationId) {
-                    startAnalysis();
-                }
-
-            } catch (e) {
-                console.error('Ошибка подключения:', e);
-                statusEl.textContent = '❌ Камера недоступна. Проверьте адрес. ' + e.message;
-                connectIpBtn.disabled = false;
-            }
-        }
-
-        function disconnectIpCamera() {
-            if (ipStream) {
-                ipStream.getTracks().forEach(track => track.stop());
-                ipStream = null;
-            }
-            video.srcObject = null;
-            currentCameraType = 'builtin';
-            cameraSource.textContent = 'встроенная камера';
-            cameraSource.style.color = 'var(--green)';
-            disconnectIpBtn.disabled = true;
             
-            // Перезапускаем встроенную камеру
-            startCamera();
-            statusEl.textContent = '✅ Встроенная камера активна';
+            videoDevices.forEach((device, index) => {
+                const option = document.createElement('option');
+                option.value = device.deviceId;
+                option.text = device.label || `Камера ${index + 1}`;
+                cameraSelect.appendChild(option);
+            });
+            
+            // Выбираем последнюю (обычно внешняя/задняя)
+            cameraSelect.selectedIndex = videoDevices.length - 1;
         }
 
-        function stopCurrentCamera() {
+        async function switchCamera(deviceId) {
+            if (!deviceId) return;
+            
+            // Останавливаем текущий поток
             if (stream) {
                 stream.getTracks().forEach(track => track.stop());
                 stream = null;
             }
-            if (ipStream) {
-                ipStream.getTracks().forEach(track => track.stop());
-                ipStream = null;
+            
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } },
+                    audio: false
+                });
+                
+                video.srcObject = stream;
+                const selectedOption = cameraSelect.options[cameraSelect.selectedIndex];
+                cameraSource.textContent = selectedOption ? selectedOption.text : 'выбрана';
+                statusEl.textContent = '✅ Камера подключена';
+                
+                enableButtons();
+                
+                if (!animationId) {
+                    startAnalysis();
+                }
+            } catch (err) {
+                statusEl.textContent = '❌ Не удалось переключить камеру';
+                console.error(err);
             }
-            if (animationId) {
-                cancelAnimationFrame(animationId);
-                animationId = null;
-            }
-            video.srcObject = null;
         }
 
         // ===== Авто-калибровка =====
@@ -438,7 +369,7 @@
 
         function startAutoCalibration() {
             if (autoCalibration.active) { stopAutoCalibration(); return; }
-            if (!stream && !ipStream) return;
+            if (!stream) return;
             
             autoCalibration.active = true;
             autoCalibration.startTime = Date.now();
@@ -587,28 +518,6 @@
 
         function addTrendPoint(t) { trendData.push({ time: Date.now(), transparency: t }); if (trendData.length > 60) trendData.shift(); drawTrend(); }
 
-        async function startCamera() {
-            try {
-                stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: { ideal: 'environment' }, width: { ideal: 640 }, height: { ideal: 480 } },
-                    audio: false
-                });
-            } catch (e) {
-                try { stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false }); }
-                catch (err) { statusEl.textContent = '❌ Нет доступа к камере'; return; }
-            }
-            video.srcObject = stream;
-            currentCameraType = 'builtin';
-            cameraSource.textContent = 'встроенная камера';
-            cameraSource.style.color = 'var(--green)';
-            video.onloadedmetadata = () => {
-                video.play();
-                statusEl.textContent = '✅ Камера работает';
-                enableButtons();
-                startAnalysis();
-            };
-        }
-
         function enableButtons() {
             areaBtn.disabled = false; calibrateLowBtn.disabled = false; calibrateHighBtn.disabled = false;
             recordBtn.disabled = false; soundToggleBtn.disabled = false; snapshotBtn.disabled = false;
@@ -642,7 +551,7 @@
 
         areaBtn.addEventListener('click', () => {
             if(isSelecting) { isSelecting=false; areaBtn.textContent='🎯 Область'; regionSelector.style.display='none'; removeListeners(); return; }
-            if(!stream && !ipStream) return; isSelecting=true; areaBtn.textContent='✋ Отменить'; addListeners();
+            if(!stream) return; isSelecting=true; areaBtn.textContent='✋ Отменить'; addListeners();
         });
         resetBtn.addEventListener('click', () => {
             analysisRegion=null; regionSelector.style.display='none';
@@ -650,9 +559,9 @@
             if(autoCalibration.active) stopAutoCalibration();
             statusEl.textContent='🔄 Сброшено';
         });
-        calibrateLowBtn.addEventListener('click', () => { if(!stream && !ipStream) return; initAudio(); calibrationLow=currentBrightness; updateCalInputs(); statusEl.textContent='📏 Нижний предел: '+calibrationLow.toFixed(1); });
+        calibrateLowBtn.addEventListener('click', () => { if(!stream) return; initAudio(); calibrationLow=currentBrightness; updateCalInputs(); statusEl.textContent='📏 Нижний предел: '+calibrationLow.toFixed(1); });
         calibrateHighBtn.addEventListener('click', () => {
-            if(!stream && !ipStream) return; initAudio();
+            if(!stream) return; initAudio();
             if(calibrationLow!==null && currentBrightness>=calibrationLow) { statusEl.textContent='❌ Ошибка!'; return; }
             calibrationHigh=currentBrightness; updateCalInputs(); statusEl.textContent='⬛ Верхний предел: '+calibrationHigh.toFixed(1);
         });
@@ -670,11 +579,11 @@
             div.innerHTML=`<div style="display:flex;justify-content:space-between"><span style="font-size:0.7rem;color:var(--text-secondary)">${now.toLocaleDateString('ru-RU')} ${now.toLocaleTimeString('ru-RU')}</span><span style="color:${w?'var(--red)':'var(--green)'}">${w?'⚠️':'✅'}</span></div><div style="display:flex;justify-content:space-between;margin-top:2px"><span style="color:var(--green);font-weight:700">${currentTransparency.toFixed(1)}%</span><span style="color:var(--blue);font-size:0.68rem">Пределы: ${calibrationLow!==null?calibrationLow.toFixed(1):'—'} / ${calibrationHigh!==null?calibrationHigh.toFixed(1):'—'}</span></div>`;
             historyList.prepend(div); updateStatistics();
         }
-        recordBtn.addEventListener('click', ()=>{ if(!stream && !ipStream) return; addHistoryRecord(); });
+        recordBtn.addEventListener('click', ()=>{ if(!stream) return; addHistoryRecord(); });
         clearHistoryBtn.addEventListener('click', ()=>{ historyList.innerHTML=''; historyRecords=[]; updateStatistics(); });
 
         snapshotBtn.addEventListener('click', ()=>{
-            if(!stream && !ipStream) return;
+            if(!stream) return;
             const c=document.createElement('canvas'); c.width=video.videoWidth; c.height=video.videoHeight;
             const ctx=c.getContext('2d'); ctx.drawImage(video,0,0);
             ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(0,0,c.width,60);
@@ -697,13 +606,13 @@
             const iv=parseInt(timerInterval.value)||5;
             timerRow.style.display='flex'; autoRecordBtn.textContent='⏸️ Стоп'; autoRecordSeconds=iv;
             const ci=setInterval(()=>{ autoRecordSeconds--; timerCountdown.textContent=autoRecordSeconds>0?autoRecordSeconds+' сек':'Запись!'; if(autoRecordSeconds<=0) autoRecordSeconds=iv; },1000);
-            autoRecordTimer=setInterval(()=>{ if(!stream && !ipStream) return; addHistoryRecord(); }, iv*1000);
+            autoRecordTimer=setInterval(()=>{ if(!stream) return; addHistoryRecord(); }, iv*1000);
             stopAutoBtn.onclick=()=>{ clearInterval(autoRecordTimer); clearInterval(ci); autoRecordTimer=null; timerRow.style.display='none'; autoRecordBtn.textContent='⏱️ Авто'; };
         });
 
         videoRecordBtn.addEventListener('click', () => isRecording ? stopVid() : startVid());
         function startVid() {
-            if(!stream && !ipStream) return;
+            if(!stream) return;
             recordedChunks=[];
             recordingCanvas=document.createElement('canvas'); recordingCanvas.width=video.videoWidth||640; recordingCanvas.height=video.videoHeight||480;
             recordingCtx=recordingCanvas.getContext('2d');
@@ -737,15 +646,13 @@
         }
 
         autoCalBtn.addEventListener('click', startAutoCalibration);
-        soundToggleBtn.addEventListener('click', ()=>{ initAudio(); soundEnabled=!soundEnabled; soundToggleBtn.textContent=soundEnabled?'🔊 Звук':'🔇 Без звука'; });
+        soundToggleBtn.addEventListener('click', ()=>{ initAudio(); soundEnabled=!soundEnabled; soundToggleBtn.textContent=soundEnabled?'🔊 Звук':'🔇 Без звука'; soundDot.classList.toggle('muted',!soundEnabled); soundStatusEl.textContent=soundEnabled?'Звук включён':'Звук выключен'; });
+        themeToggleBtn.addEventListener('click', toggleTheme);
+        cameraSelect.addEventListener('change', () => switchCamera(cameraSelect.value));
+        refreshCamerasBtn.addEventListener('click', getCameraList);
 
-        // ===== Обработчики IP-камеры =====
-        connectIpBtn.addEventListener('click', connectToIpCamera);
-        disconnectIpBtn.addEventListener('click', disconnectIpCamera);
-
-        // ===== Анализ =====
         function analyzeFrame() {
-            if((!stream && !ipStream) || video.readyState < 2) { animationId = requestAnimationFrame(analyzeFrame); return; }
+            if(!stream || video.readyState < 2) { animationId = requestAnimationFrame(analyzeFrame); return; }
             const c=document.createElement('canvas'); c.width=video.videoWidth; c.height=video.videoHeight;
             const ctx=c.getContext('2d'); ctx.drawImage(video,0,0);
             let img;
@@ -774,18 +681,19 @@
         }
         function startAnalysis() { if(animationId) cancelAnimationFrame(animationId); analyzeFrame(); }
 
-        // ===== Инициализация =====
-        themeToggleBtn.addEventListener('click', toggleTheme);
         document.addEventListener('click', initAudio, { once: true });
         document.addEventListener('touchstart', initAudio, { once: true });
 
-        window.addEventListener('load', ()=>{
+        window.addEventListener('load', async ()=>{
             if(!navigator.mediaDevices?.getUserMedia) { statusEl.textContent='❌ Нет камеры'; return; }
-            startCamera();
+            await getCameraList();
+            // Запускаем камеру по умолчанию (последнюю в списке)
+            if (cameraSelect.options.length > 0 && cameraSelect.value) {
+                switchCamera(cameraSelect.value);
+            }
         });
         window.addEventListener('beforeunload', ()=>{
             if(stream) stream.getTracks().forEach(t=>t.stop());
-            if(ipStream) ipStream.getTracks().forEach(t=>t.stop());
             if(autoRecordTimer) clearInterval(autoRecordTimer);
             if(autoCalibration.active) stopAutoCalibration();
             if(isRecording) stopVid();
