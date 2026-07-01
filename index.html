@@ -35,18 +35,28 @@
             padding: 8px 12px; border-radius: 20px; cursor: pointer; font-size: 0.8rem;
         }
         
-        .camera-select-row {
-            display: flex; gap: 8px; align-items: center; justify-content: center;
+        /* Блок IP-камеры */
+        .ip-camera-row {
+            display: flex; gap: 6px; align-items: center; justify-content: center;
             margin: 8px 0; flex-wrap: wrap;
         }
-        .camera-select-row select {
-            flex: 1 1 auto; min-width: 180px; padding: 8px 10px; border-radius: 8px;
+        .ip-camera-row input {
+            flex: 1 1 auto; min-width: 160px; padding: 8px 10px; border-radius: 8px;
             border: 1px solid var(--border); background: var(--surface); color: var(--text);
-            font-size: 0.85rem;
+            font-size: 0.8rem; text-align: left;
+        }
+        .ip-camera-row input::placeholder { color: var(--text-secondary); font-size: 0.7rem; }
+        .ip-camera-row button {
+            flex: 0 0 auto; min-width: 70px; padding: 8px 10px; font-size: 0.7rem;
+        }
+        .ip-camera-row select {
+            padding: 8px 6px; border-radius: 8px; border: 1px solid var(--border);
+            background: var(--surface); color: var(--text); font-size: 0.75rem;
         }
         .camera-status {
             font-size: 0.7rem; color: var(--text-secondary); margin: 4px 0;
         }
+        .camera-status .active-source { color: var(--green); font-weight: 600; }
         
         .video-wrapper {
             position: relative; width: 100%; aspect-ratio: 4/3; background: #000;
@@ -186,15 +196,14 @@
             <button id="themeToggleBtn">☀️ Светлая</button>
         </div>
         
-        <!-- Выбор камеры -->
-        <div class="camera-select-row">
-            <select id="cameraSelect">
-                <option value="">Загрузка камер...</option>
-            </select>
-            <button id="refreshCamerasBtn" class="btn-cyan" style="flex:0 0 auto; min-width:40px;">🔄</button>
+        <!-- Блок IP-камеры -->
+        <div class="ip-camera-row">
+            <input type="text" id="ipCameraInput" placeholder="IP-адрес (http://192.168.1.100:8080/video)">
+            <button id="connectIpBtn" class="btn-cyan">📡 Подключить</button>
+            <button id="disconnectIpBtn" class="btn-red" disabled>✕</button>
         </div>
         <div class="camera-status">
-            Активная камера: <span id="cameraSource" style="color:var(--green);font-weight:600;">—</span>
+            Источник: <span class="active-source" id="cameraSource">встроенная камера</span>
         </div>
         
         <div class="video-wrapper" id="videoWrapper">
@@ -268,8 +277,9 @@
         const video = document.getElementById('video');
         const overlayCanvas = document.getElementById('overlayCanvas');
         const overlayCtx = overlayCanvas.getContext('2d');
-        const cameraSelect = document.getElementById('cameraSelect');
-        const refreshCamerasBtn = document.getElementById('refreshCamerasBtn');
+        const ipCameraInput = document.getElementById('ipCameraInput');
+        const connectIpBtn = document.getElementById('connectIpBtn');
+        const disconnectIpBtn = document.getElementById('disconnectIpBtn');
         const cameraSource = document.getElementById('cameraSource');
         const areaBtn = document.getElementById('areaBtn'), resetBtn = document.getElementById('resetBtn');
         const calibrateLowBtn = document.getElementById('calibrateLowBtn'), calibrateHighBtn = document.getElementById('calibrateHighBtn');
@@ -299,66 +309,152 @@
         let autoRecordTimer = null, autoRecordSeconds = 0, historyRecords = [];
         let isDarkTheme = true, mediaRecorder = null, recordedChunks = [], isRecording = false;
         let recordingCanvas = null, recordingCtx = null, recordingStream = null;
+        let ipStream = null, ipVideoElement = null;
 
-        // ===== Список камер =====
-        async function getCameraList() {
-            try {
-                // Запрашиваем разрешение, чтобы получить labels
-                await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-            } catch (e) {
-                // Игнорируем ошибку
-            }
-            
-            const devices = await navigator.mediaDevices.enumerateDevices();
-            const videoDevices = devices.filter(d => d.kind === 'videoinput');
-            
-            cameraSelect.innerHTML = '';
-            
-            if (videoDevices.length === 0) {
-                cameraSelect.innerHTML = '<option value="">Камеры не найдены</option>';
+        // ===== IP-камера (через CORS-прокси) =====
+        const CORS_PROXIES = [
+            (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+            (url) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+            (url) => `https://proxy.cors.sh/${url}`,
+        ];
+
+        async function connectToIpCamera() {
+            let address = ipCameraInput.value.trim();
+            if (!address) {
+                statusEl.textContent = '❌ Введите IP-адрес камеры';
                 return;
             }
+
+            statusEl.textContent = '📡 Подключение к IP-камере...';
+            connectIpBtn.disabled = true;
+
+            // Добавляем http:// если нет протокола
+            if (!address.startsWith('http://') && !address.startsWith('https://')) {
+                address = 'http://' + address;
+            }
+
+            // Пробуем прямое подключение (работает при открытии файла локально)
+            let connected = await tryDirectConnect(address);
             
-            videoDevices.forEach((device, index) => {
-                const option = document.createElement('option');
-                option.value = device.deviceId;
-                option.text = device.label || `Камера ${index + 1}`;
-                cameraSelect.appendChild(option);
-            });
-            
-            // Выбираем последнюю (обычно внешняя/задняя)
-            cameraSelect.selectedIndex = videoDevices.length - 1;
+            // Если не вышло — пробуем через прокси
+            if (!connected) {
+                for (const proxyFn of CORS_PROXIES) {
+                    const proxyUrl = proxyFn(address);
+                    console.log('Пробуем прокси:', proxyUrl);
+                    connected = await tryDirectConnect(proxyUrl);
+                    if (connected) break;
+                }
+            }
+
+            if (connected) {
+                // Останавливаем встроенную камеру
+                if (stream) {
+                    stream.getTracks().forEach(t => t.stop());
+                    stream = null;
+                }
+                
+                cameraSource.textContent = 'IP-камера: ' + address;
+                cameraSource.style.color = 'var(--green)';
+                disconnectIpBtn.disabled = false;
+                connectIpBtn.disabled = false;
+                statusEl.textContent = '✅ IP-камера подключена';
+            } else {
+                statusEl.textContent = '❌ Не удалось подключиться. Проверьте адрес или откройте страницу локально.';
+                connectIpBtn.disabled = false;
+            }
         }
 
-        async function switchCamera(deviceId) {
-            if (!deviceId) return;
-            
-            // Останавливаем текущий поток
-            if (stream) {
-                stream.getTracks().forEach(track => track.stop());
-                stream = null;
+        async function tryDirectConnect(url) {
+            return new Promise((resolve) => {
+                const testVideo = document.createElement('video');
+                testVideo.crossOrigin = 'anonymous';
+                testVideo.muted = true;
+                testVideo.playsInline = true;
+                testVideo.autoplay = true;
+
+                const timeout = setTimeout(() => {
+                    testVideo.src = '';
+                    resolve(false);
+                }, 8000);
+
+                testVideo.onloadedmetadata = () => {
+                    clearTimeout(timeout);
+                    testVideo.play().then(() => {
+                        // Создаём MediaStream из video
+                        if (testVideo.captureStream) {
+                            ipStream = testVideo.captureStream();
+                        } else {
+                            const canvas = document.createElement('canvas');
+                            canvas.width = testVideo.videoWidth || 640;
+                            canvas.height = testVideo.videoHeight || 480;
+                            const ctx = canvas.getContext('2d');
+                            setInterval(() => {
+                                if (testVideo.readyState >= 2) {
+                                    canvas.width = testVideo.videoWidth;
+                                    canvas.height = testVideo.videoHeight;
+                                    ctx.drawImage(testVideo, 0, 0);
+                                }
+                            }, 1000 / 30);
+                            ipStream = canvas.captureStream(30);
+                        }
+                        
+                        ipVideoElement = testVideo;
+                        video.srcObject = ipStream;
+                        enableButtons();
+                        if (!animationId) startAnalysis();
+                        resolve(true);
+                    }).catch(() => {
+                        resolve(false);
+                    });
+                };
+
+                testVideo.onerror = () => {
+                    clearTimeout(timeout);
+                    resolve(false);
+                };
+
+                testVideo.src = url;
+            });
+        }
+
+        function disconnectIpCamera() {
+            if (ipStream) {
+                ipStream.getTracks().forEach(t => t.stop());
+                ipStream = null;
             }
+            if (ipVideoElement) {
+                ipVideoElement.src = '';
+                ipVideoElement = null;
+            }
+            video.srcObject = null;
+            cameraSource.textContent = 'встроенная камера';
+            cameraSource.style.color = 'var(--green)';
+            disconnectIpBtn.disabled = true;
             
+            // Запускаем встроенную камеру
+            startCamera();
+        }
+
+        // ===== Встроенная камера =====
+        async function startCamera() {
             try {
                 stream = await navigator.mediaDevices.getUserMedia({
-                    video: { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } },
+                    video: { facingMode: { ideal: 'environment' }, width: { ideal: 640 }, height: { ideal: 480 } },
                     audio: false
                 });
-                
-                video.srcObject = stream;
-                const selectedOption = cameraSelect.options[cameraSelect.selectedIndex];
-                cameraSource.textContent = selectedOption ? selectedOption.text : 'выбрана';
-                statusEl.textContent = '✅ Камера подключена';
-                
-                enableButtons();
-                
-                if (!animationId) {
-                    startAnalysis();
-                }
-            } catch (err) {
-                statusEl.textContent = '❌ Не удалось переключить камеру';
-                console.error(err);
+            } catch (e) {
+                try { stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false }); }
+                catch (err) { statusEl.textContent = '❌ Нет доступа к камере'; return; }
             }
+            video.srcObject = stream;
+            cameraSource.textContent = 'встроенная камера';
+            cameraSource.style.color = 'var(--green)';
+            video.onloadedmetadata = () => {
+                video.play();
+                statusEl.textContent = '✅ Камера работает';
+                enableButtons();
+                startAnalysis();
+            };
         }
 
         // ===== Авто-калибровка =====
@@ -369,7 +465,7 @@
 
         function startAutoCalibration() {
             if (autoCalibration.active) { stopAutoCalibration(); return; }
-            if (!stream) return;
+            if (!stream && !ipStream) return;
             
             autoCalibration.active = true;
             autoCalibration.startTime = Date.now();
@@ -428,30 +524,15 @@
         }
 
         // ===== Тема =====
-        function toggleTheme() {
-            isDarkTheme = !isDarkTheme;
-            document.body.classList.toggle('light-theme', !isDarkTheme);
-            themeToggleBtn.textContent = isDarkTheme ? '☀️ Светлая' : '🌙 Тёмная';
-            drawTrend();
-        }
+        function toggleTheme() { isDarkTheme = !isDarkTheme; document.body.classList.toggle('light-theme', !isDarkTheme); themeToggleBtn.textContent = isDarkTheme ? '☀️ Светлая' : '🌙 Тёмная'; drawTrend(); }
 
         // ===== Звук =====
-        function initAudio() {
-            if (!audioCtx) { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); if (audioCtx.state === 'suspended') audioCtx.resume(); }
-        }
+        function initAudio() { if (!audioCtx) { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); if (audioCtx.state === 'suspended') audioCtx.resume(); } }
         function playCalmBeep() {
             if (!soundEnabled || !audioCtx) return;
-            const now = Date.now();
-            if (now - lastBeepTime < beepInterval) return;
-            lastBeepTime = now;
+            const now = Date.now(); if (now - lastBeepTime < beepInterval) return; lastBeepTime = now;
             const t = audioCtx.currentTime;
-            const tone = (f, st, d, v) => {
-                const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-                o.connect(g); g.connect(audioCtx.destination);
-                o.type = 'sine'; o.frequency.setValueAtTime(f, st);
-                g.gain.setValueAtTime(0, st); g.gain.linearRampToValueAtTime(v, st+0.05); g.gain.linearRampToValueAtTime(0, st+d);
-                o.start(st); o.stop(st+d);
-            };
+            const tone = (f, st, d, v) => { const o = audioCtx.createOscillator(), g = audioCtx.createGain(); o.connect(g); g.connect(audioCtx.destination); o.type = 'sine'; o.frequency.setValueAtTime(f, st); g.gain.setValueAtTime(0, st); g.gain.linearRampToValueAtTime(v, st+0.05); g.gain.linearRampToValueAtTime(0, st+d); o.start(st); o.stop(st+d); };
             tone(440, t, 0.3, 0.08); tone(554, t+0.2, 0.25, 0.06);
             beepInterval = Math.max(800, 3000 - currentTransparency * 30);
         }
@@ -459,60 +540,38 @@
         function updateDateTime() { datetimeEl.textContent = new Date().toLocaleString('ru-RU', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit' }); }
         setInterval(updateDateTime, 1000); updateDateTime();
 
-        function updateCalInputs() {
-            lowCalInput.value = calibrationLow !== null ? calibrationLow.toFixed(1) : '';
-            highCalInput.value = calibrationHigh !== null ? calibrationHigh.toFixed(1) : '';
-        }
-
+        function updateCalInputs() { lowCalInput.value = calibrationLow !== null ? calibrationLow.toFixed(1) : ''; highCalInput.value = calibrationHigh !== null ? calibrationHigh.toFixed(1) : ''; }
         function updateStatistics() {
             if (!historyRecords.length) { statAvg.textContent='—'; statMin.textContent='—'; statMax.textContent='—'; statCount.textContent='0'; return; }
             const v = historyRecords.map(r=>r.transparency);
-            statAvg.textContent = (v.reduce((a,b)=>a+b,0)/v.length).toFixed(1)+'%';
-            statMin.textContent = Math.min(...v).toFixed(1)+'%';
-            statMax.textContent = Math.max(...v).toFixed(1)+'%';
-            statCount.textContent = v.length;
+            statAvg.textContent = (v.reduce((a,b)=>a+b,0)/v.length).toFixed(1)+'%'; statMin.textContent = Math.min(...v).toFixed(1)+'%'; statMax.textContent = Math.max(...v).toFixed(1)+'%'; statCount.textContent = v.length;
         }
 
         function drawVideoOverlay() {
-            overlayCanvas.width = video.videoWidth || 640;
-            overlayCanvas.height = 80;
+            overlayCanvas.width = video.videoWidth || 640; overlayCanvas.height = 80;
             overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
-            overlayCtx.fillStyle = 'rgba(0,0,0,0.5)';
-            overlayCtx.fillRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+            overlayCtx.fillStyle = 'rgba(0,0,0,0.5)'; overlayCtx.fillRect(0, 0, overlayCanvas.width, overlayCanvas.height);
             if (trendData.length < 2) return;
             const pts = trendData.slice(-30), w = overlayCanvas.width, h = overlayCanvas.height, xs = w/(pts.length-1);
             overlayCtx.beginPath(); overlayCtx.strokeStyle = '#3fb950'; overlayCtx.lineWidth = 2;
-            for (let i = 0; i < pts.length; i++) {
-                const x = i*xs, y = h-20-(pts[i].transparency/100)*(h-30);
-                i === 0 ? overlayCtx.moveTo(x,y) : overlayCtx.lineTo(x,y);
-            }
-            overlayCtx.stroke();
-            overlayCtx.fillStyle = '#3fb950'; overlayCtx.font = 'bold 14px sans-serif';
-            overlayCtx.fillText(`${currentTransparency.toFixed(1)}%`, 10, 20);
+            for (let i = 0; i < pts.length; i++) { const x = i*xs, y = h-20-(pts[i].transparency/100)*(h-30); i === 0 ? overlayCtx.moveTo(x,y) : overlayCtx.lineTo(x,y); }
+            overlayCtx.stroke(); overlayCtx.fillStyle = '#3fb950'; overlayCtx.font = 'bold 14px sans-serif'; overlayCtx.fillText(`${currentTransparency.toFixed(1)}%`, 10, 20);
         }
 
         function drawTrend() {
             ctxTrend.clearRect(0, 0, trendCanvas.width, trendCanvas.height);
-            ctxTrend.fillStyle = isDarkTheme ? '#282c34' : '#f0f2f5';
-            ctxTrend.fillRect(0, 0, trendCanvas.width, trendCanvas.height);
+            ctxTrend.fillStyle = isDarkTheme ? '#282c34' : '#f0f2f5'; ctxTrend.fillRect(0, 0, trendCanvas.width, trendCanvas.height);
             if (trendData.length < 2) return;
             const w = trendCanvas.width, h = trendCanvas.height, pts = trendData.slice(-30), xs = w/(pts.length-1);
             ctxTrend.beginPath(); ctxTrend.moveTo(0, h);
             for (let i = 0; i < pts.length; i++) ctxTrend.lineTo(i*xs, h-(pts[i].transparency/100)*h);
             ctxTrend.lineTo(w, h); ctxTrend.closePath();
-            const g = ctxTrend.createLinearGradient(0,0,0,h);
-            g.addColorStop(0,'rgba(63,185,80,0.3)'); g.addColorStop(1,'rgba(63,185,80,0)');
-            ctxTrend.fillStyle = g; ctxTrend.fill();
+            const g = ctxTrend.createLinearGradient(0,0,0,h); g.addColorStop(0,'rgba(63,185,80,0.3)'); g.addColorStop(1,'rgba(63,185,80,0)'); ctxTrend.fillStyle = g; ctxTrend.fill();
             ctxTrend.beginPath(); ctxTrend.strokeStyle = '#3fb950'; ctxTrend.lineWidth = 2.5;
-            for (let i = 0; i < pts.length; i++) {
-                const x = i*xs, y = h-(pts[i].transparency/100)*h;
-                i === 0 ? ctxTrend.moveTo(x,y) : ctxTrend.lineTo(x,y);
-            }
+            for (let i = 0; i < pts.length; i++) { const x = i*xs, y = h-(pts[i].transparency/100)*h; i === 0 ? ctxTrend.moveTo(x,y) : ctxTrend.lineTo(x,y); }
             ctxTrend.stroke();
             const th = parseFloat(thresholdInput.value)||30;
-            ctxTrend.beginPath(); ctxTrend.strokeStyle = '#f85149'; ctxTrend.lineWidth = 1.5;
-            ctxTrend.setLineDash([6,4]); ctxTrend.moveTo(0, h-(th/100)*h); ctxTrend.lineTo(w, h-(th/100)*h);
-            ctxTrend.stroke(); ctxTrend.setLineDash([]);
+            ctxTrend.beginPath(); ctxTrend.strokeStyle = '#f85149'; ctxTrend.lineWidth = 1.5; ctxTrend.setLineDash([6,4]); ctxTrend.moveTo(0, h-(th/100)*h); ctxTrend.lineTo(w, h-(th/100)*h); ctxTrend.stroke(); ctxTrend.setLineDash([]);
             drawVideoOverlay();
         }
 
@@ -525,52 +584,20 @@
             autoCalBtn.disabled = false; resetBtn.disabled = false;
         }
 
-        function getCoords(e) {
-            const r = video.getBoundingClientRect();
-            return { x: (e.touches?e.touches[0].clientX:e.clientX)-r.left, y: (e.touches?e.touches[0].clientY:e.clientY)-r.top, rw: r.width, rh: r.height };
-        }
+        // ===== Выбор области =====
+        function getCoords(e) { const r = video.getBoundingClientRect(); return { x: (e.touches?e.touches[0].clientX:e.clientX)-r.left, y: (e.touches?e.touches[0].clientY:e.clientY)-r.top, rw: r.width, rh: r.height }; }
         let sx, sy;
-        function pd(e) { if(!isSelecting) return; e.preventDefault(); const p=getCoords(e); sx=p.x; sy=p.y;
-            regionSelector.style.display='block'; regionSelector.style.left=p.x+'px'; regionSelector.style.top=p.y+'px';
-            regionSelector.style.width='0px'; regionSelector.style.height='0px'; }
-        function pm(e) { if(!isSelecting||sx===undefined) return; e.preventDefault(); const p=getCoords(e);
-            regionSelector.style.left=Math.min(sx,p.x)+'px'; regionSelector.style.top=Math.min(sy,p.y)+'px';
-            regionSelector.style.width=Math.abs(p.x-sx)+'px'; regionSelector.style.height=Math.abs(p.y-sy)+'px'; }
-        function pu(e) { if(!isSelecting||sx===undefined) return; e.preventDefault(); const p=getCoords(e);
-            const scX=video.videoWidth/p.rw, scY=video.videoHeight/p.rh;
-            analysisRegion={ x:Math.min(sx,p.x)*scX, y:Math.min(sy,p.y)*scY, width:Math.abs(p.x-sx)*scX, height:Math.abs(p.y-sy)*scY };
-            isSelecting=false; areaBtn.textContent='🎯 Область'; removeListeners(); }
-        function addListeners() {
-            video.addEventListener('mousedown',pd); video.addEventListener('mousemove',pm); video.addEventListener('mouseup',pu);
-            video.addEventListener('touchstart',pd,{passive:false}); video.addEventListener('touchmove',pm,{passive:false}); video.addEventListener('touchend',pu);
-        }
-        function removeListeners() {
-            video.removeEventListener('mousedown',pd); video.removeEventListener('mousemove',pm); video.removeEventListener('mouseup',pu);
-            video.removeEventListener('touchstart',pd); video.removeEventListener('touchmove',pm); video.removeEventListener('touchend',pu);
-        }
+        function pd(e) { if(!isSelecting) return; e.preventDefault(); const p=getCoords(e); sx=p.x; sy=p.y; regionSelector.style.display='block'; regionSelector.style.left=p.x+'px'; regionSelector.style.top=p.y+'px'; regionSelector.style.width='0px'; regionSelector.style.height='0px'; }
+        function pm(e) { if(!isSelecting||sx===undefined) return; e.preventDefault(); const p=getCoords(e); regionSelector.style.left=Math.min(sx,p.x)+'px'; regionSelector.style.top=Math.min(sy,p.y)+'px'; regionSelector.style.width=Math.abs(p.x-sx)+'px'; regionSelector.style.height=Math.abs(p.y-sy)+'px'; }
+        function pu(e) { if(!isSelecting||sx===undefined) return; e.preventDefault(); const p=getCoords(e); const scX=video.videoWidth/p.rw, scY=video.videoHeight/p.rh; analysisRegion={ x:Math.min(sx,p.x)*scX, y:Math.min(sy,p.y)*scY, width:Math.abs(p.x-sx)*scX, height:Math.abs(p.y-sy)*scY }; isSelecting=false; areaBtn.textContent='🎯 Область'; removeListeners(); }
+        function addListeners() { video.addEventListener('mousedown',pd); video.addEventListener('mousemove',pm); video.addEventListener('mouseup',pu); video.addEventListener('touchstart',pd,{passive:false}); video.addEventListener('touchmove',pm,{passive:false}); video.addEventListener('touchend',pu); }
+        function removeListeners() { video.removeEventListener('mousedown',pd); video.removeEventListener('mousemove',pm); video.removeEventListener('mouseup',pu); video.removeEventListener('touchstart',pd); video.removeEventListener('touchmove',pm); video.removeEventListener('touchend',pu); }
 
-        areaBtn.addEventListener('click', () => {
-            if(isSelecting) { isSelecting=false; areaBtn.textContent='🎯 Область'; regionSelector.style.display='none'; removeListeners(); return; }
-            if(!stream) return; isSelecting=true; areaBtn.textContent='✋ Отменить'; addListeners();
-        });
-        resetBtn.addEventListener('click', () => {
-            analysisRegion=null; regionSelector.style.display='none';
-            calibrationLow=null; calibrationHigh=null; updateCalInputs();
-            if(autoCalibration.active) stopAutoCalibration();
-            statusEl.textContent='🔄 Сброшено';
-        });
-        calibrateLowBtn.addEventListener('click', () => { if(!stream) return; initAudio(); calibrationLow=currentBrightness; updateCalInputs(); statusEl.textContent='📏 Нижний предел: '+calibrationLow.toFixed(1); });
-        calibrateHighBtn.addEventListener('click', () => {
-            if(!stream) return; initAudio();
-            if(calibrationLow!==null && currentBrightness>=calibrationLow) { statusEl.textContent='❌ Ошибка!'; return; }
-            calibrationHigh=currentBrightness; updateCalInputs(); statusEl.textContent='⬛ Верхний предел: '+calibrationHigh.toFixed(1);
-        });
-        applyCalBtn.addEventListener('click', () => {
-            const l=parseFloat(lowCalInput.value), h=parseFloat(highCalInput.value);
-            if(!isNaN(l)) calibrationLow=l;
-            if(!isNaN(h)) { if(calibrationLow!==null && h>=calibrationLow) { statusEl.textContent='❌ Ошибка!'; return; } calibrationHigh=h; }
-            updateCalInputs(); statusEl.textContent='✅ Обновлено';
-        });
+        areaBtn.addEventListener('click', ()=>{ if(isSelecting) { isSelecting=false; areaBtn.textContent='🎯 Область'; regionSelector.style.display='none'; removeListeners(); return; } if(!stream && !ipStream) return; isSelecting=true; areaBtn.textContent='✋ Отменить'; addListeners(); });
+        resetBtn.addEventListener('click', ()=>{ analysisRegion=null; regionSelector.style.display='none'; calibrationLow=null; calibrationHigh=null; updateCalInputs(); if(autoCalibration.active) stopAutoCalibration(); statusEl.textContent='🔄 Сброшено'; });
+        calibrateLowBtn.addEventListener('click', ()=>{ if(!stream && !ipStream) return; initAudio(); calibrationLow=currentBrightness; updateCalInputs(); statusEl.textContent='📏 Нижний: '+calibrationLow.toFixed(1); });
+        calibrateHighBtn.addEventListener('click', ()=>{ if(!stream && !ipStream) return; initAudio(); if(calibrationLow!==null && currentBrightness>=calibrationLow) { statusEl.textContent='❌ Ошибка!'; return; } calibrationHigh=currentBrightness; updateCalInputs(); statusEl.textContent='⬛ Верхний: '+calibrationHigh.toFixed(1); });
+        applyCalBtn.addEventListener('click', ()=>{ const l=parseFloat(lowCalInput.value), h=parseFloat(highCalInput.value); if(!isNaN(l)) calibrationLow=l; if(!isNaN(h)) { if(calibrationLow!==null && h>=calibrationLow) { statusEl.textContent='❌ Ошибка!'; return; } calibrationHigh=h; } updateCalInputs(); statusEl.textContent='✅ Обновлено'; });
 
         function addHistoryRecord() {
             const now=new Date(), th=parseFloat(thresholdInput.value)||30, w=currentTransparency<th;
@@ -579,100 +606,39 @@
             div.innerHTML=`<div style="display:flex;justify-content:space-between"><span style="font-size:0.7rem;color:var(--text-secondary)">${now.toLocaleDateString('ru-RU')} ${now.toLocaleTimeString('ru-RU')}</span><span style="color:${w?'var(--red)':'var(--green)'}">${w?'⚠️':'✅'}</span></div><div style="display:flex;justify-content:space-between;margin-top:2px"><span style="color:var(--green);font-weight:700">${currentTransparency.toFixed(1)}%</span><span style="color:var(--blue);font-size:0.68rem">Пределы: ${calibrationLow!==null?calibrationLow.toFixed(1):'—'} / ${calibrationHigh!==null?calibrationHigh.toFixed(1):'—'}</span></div>`;
             historyList.prepend(div); updateStatistics();
         }
-        recordBtn.addEventListener('click', ()=>{ if(!stream) return; addHistoryRecord(); });
+        recordBtn.addEventListener('click', ()=>{ if(!stream && !ipStream) return; addHistoryRecord(); });
         clearHistoryBtn.addEventListener('click', ()=>{ historyList.innerHTML=''; historyRecords=[]; updateStatistics(); });
 
-        snapshotBtn.addEventListener('click', ()=>{
-            if(!stream) return;
-            const c=document.createElement('canvas'); c.width=video.videoWidth; c.height=video.videoHeight;
-            const ctx=c.getContext('2d'); ctx.drawImage(video,0,0);
-            ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(0,0,c.width,60);
-            ctx.fillStyle='#3fb950'; ctx.font='bold 24px sans-serif'; ctx.fillText('Прозрачность: '+currentTransparency.toFixed(1)+'%',20,40);
-            const a=document.createElement('a'); a.download='snap_'+new Date().toISOString().slice(0,19).replace(/:/g,'-')+'.png';
-            a.href=c.toDataURL('image/png'); a.click(); statusEl.textContent='📸 Снимок сохранён';
-        });
-
-        exportBtn.addEventListener('click', ()=>{
-            if(!historyRecords.length) { statusEl.textContent='❌ Нет данных'; return; }
-            let csv='Дата;Время;Прозрачность(%);Яркость;Нижний предел;Верхний предел;Статус\n';
-            historyRecords.forEach(r=>{ csv+=`${r.date};${r.time};${r.transparency.toFixed(1)};${r.brightness.toFixed(1)};${r.lowLimit!==null?r.lowLimit.toFixed(1):'—'};${r.highLimit!==null?r.highLimit.toFixed(1):'—'};${r.warning?'WARNING':'Норма'}\n`; });
-            const b=new Blob(['\uFEFF'+csv],{type:'text/csv'}), a=document.createElement('a');
-            a.download='data_'+new Date().toISOString().slice(0,10)+'.csv'; a.href=URL.createObjectURL(b);
-            a.click(); statusEl.textContent='📊 Экспорт ('+historyRecords.length+' записей)';
-        });
-
-        autoRecordBtn.addEventListener('click', ()=>{
-            if(autoRecordTimer) { clearInterval(autoRecordTimer); autoRecordTimer=null; timerRow.style.display='none'; autoRecordBtn.textContent='⏱️ Авто'; return; }
-            const iv=parseInt(timerInterval.value)||5;
-            timerRow.style.display='flex'; autoRecordBtn.textContent='⏸️ Стоп'; autoRecordSeconds=iv;
-            const ci=setInterval(()=>{ autoRecordSeconds--; timerCountdown.textContent=autoRecordSeconds>0?autoRecordSeconds+' сек':'Запись!'; if(autoRecordSeconds<=0) autoRecordSeconds=iv; },1000);
-            autoRecordTimer=setInterval(()=>{ if(!stream) return; addHistoryRecord(); }, iv*1000);
-            stopAutoBtn.onclick=()=>{ clearInterval(autoRecordTimer); clearInterval(ci); autoRecordTimer=null; timerRow.style.display='none'; autoRecordBtn.textContent='⏱️ Авто'; };
-        });
-
+        snapshotBtn.addEventListener('click', ()=>{ if(!stream && !ipStream) return; const c=document.createElement('canvas'); c.width=video.videoWidth; c.height=video.videoHeight; const ctx=c.getContext('2d'); ctx.drawImage(video,0,0); ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(0,0,c.width,60); ctx.fillStyle='#3fb950'; ctx.font='bold 24px sans-serif'; ctx.fillText('Прозрачность: '+currentTransparency.toFixed(1)+'%',20,40); const a=document.createElement('a'); a.download='snap_'+new Date().toISOString().slice(0,19).replace(/:/g,'-')+'.png'; a.href=c.toDataURL('image/png'); a.click(); statusEl.textContent='📸 Снимок сохранён'; });
+        exportBtn.addEventListener('click', ()=>{ if(!historyRecords.length) { statusEl.textContent='❌ Нет данных'; return; } let csv='Дата;Время;Прозрачность(%);Яркость;Нижний предел;Верхний предел;Статус\n'; historyRecords.forEach(r=>{ csv+=`${r.date};${r.time};${r.transparency.toFixed(1)};${r.brightness.toFixed(1)};${r.lowLimit!==null?r.lowLimit.toFixed(1):'—'};${r.highLimit!==null?r.highLimit.toFixed(1):'—'};${r.warning?'WARNING':'Норма'}\n`; }); const b=new Blob(['\uFEFF'+csv],{type:'text/csv'}), a=document.createElement('a'); a.download='data_'+new Date().toISOString().slice(0,10)+'.csv'; a.href=URL.createObjectURL(b); a.click(); statusEl.textContent='📊 Экспорт ('+historyRecords.length+' записей)'; });
+        autoRecordBtn.addEventListener('click', ()=>{ if(autoRecordTimer) { clearInterval(autoRecordTimer); autoRecordTimer=null; timerRow.style.display='none'; autoRecordBtn.textContent='⏱️ Авто'; return; } const iv=parseInt(timerInterval.value)||5; timerRow.style.display='flex'; autoRecordBtn.textContent='⏸️ Стоп'; autoRecordSeconds=iv; const ci=setInterval(()=>{ autoRecordSeconds--; timerCountdown.textContent=autoRecordSeconds>0?autoRecordSeconds+' сек':'Запись!'; if(autoRecordSeconds<=0) autoRecordSeconds=iv; },1000); autoRecordTimer=setInterval(()=>{ if(!stream && !ipStream) return; addHistoryRecord(); }, iv*1000); stopAutoBtn.onclick=()=>{ clearInterval(autoRecordTimer); clearInterval(ci); autoRecordTimer=null; timerRow.style.display='none'; autoRecordBtn.textContent='⏱️ Авто'; }; });
         videoRecordBtn.addEventListener('click', () => isRecording ? stopVid() : startVid());
-        function startVid() {
-            if(!stream) return;
-            recordedChunks=[];
-            recordingCanvas=document.createElement('canvas'); recordingCanvas.width=video.videoWidth||640; recordingCanvas.height=video.videoHeight||480;
-            recordingCtx=recordingCanvas.getContext('2d');
-            recordingStream=recordingCanvas.captureStream(30);
-            try { mediaRecorder=new MediaRecorder(recordingStream,{mimeType:'video/webm;codecs=vp9'}); }
-            catch(e) { mediaRecorder=new MediaRecorder(recordingStream,{mimeType:'video/webm'}); }
-            mediaRecorder.ondataavailable=e=>{ if(e.data.size>0) recordedChunks.push(e.data); };
-            mediaRecorder.onstop=()=>{
-                const blob=new Blob(recordedChunks,{type:'video/webm'});
-                const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
-                a.download='video_'+new Date().toISOString().slice(0,19).replace(/:/g,'-')+'.webm';
-                a.click(); statusEl.textContent='🎥 Видео сохранено';
-            };
-            mediaRecorder.start(); isRecording=true; videoRecordBtn.textContent='⏹️ Стоп'; recordIndicator.style.display='block';
-            statusEl.textContent='🎥 Запись...'; renderFrame();
-        }
+        function startVid() { if(!stream && !ipStream) return; recordedChunks=[]; recordingCanvas=document.createElement('canvas'); recordingCanvas.width=video.videoWidth||640; recordingCanvas.height=video.videoHeight||480; recordingCtx=recordingCanvas.getContext('2d'); recordingStream=recordingCanvas.captureStream(30); try { mediaRecorder=new MediaRecorder(recordingStream,{mimeType:'video/webm;codecs=vp9'}); } catch(e) { mediaRecorder=new MediaRecorder(recordingStream,{mimeType:'video/webm'}); } mediaRecorder.ondataavailable=e=>{ if(e.data.size>0) recordedChunks.push(e.data); }; mediaRecorder.onstop=()=>{ const blob=new Blob(recordedChunks,{type:'video/webm'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='video_'+new Date().toISOString().slice(0,19).replace(/:/g,'-')+'.webm'; a.click(); statusEl.textContent='🎥 Видео сохранено'; }; mediaRecorder.start(); isRecording=true; videoRecordBtn.textContent='⏹️ Стоп'; recordIndicator.style.display='block'; statusEl.textContent='🎥 Запись...'; renderFrame(); }
         function stopVid() { if(mediaRecorder&&mediaRecorder.state!=='inactive') mediaRecorder.stop(); isRecording=false; videoRecordBtn.textContent='🎥 Видео'; recordIndicator.style.display='none'; }
-        function renderFrame() {
-            if(!isRecording) return;
-            recordingCtx.drawImage(video,0,0,recordingCanvas.width,recordingCanvas.height);
-            recordingCtx.fillStyle='rgba(0,0,0,0.5)'; recordingCtx.fillRect(0,recordingCanvas.height-80,recordingCanvas.width,80);
-            if(trendData.length>=2) {
-                const pts=trendData.slice(-30),w=recordingCanvas.width,h=recordingCanvas.height,xs=w/(pts.length-1);
-                recordingCtx.beginPath(); recordingCtx.strokeStyle='#3fb950'; recordingCtx.lineWidth=2;
-                for(let i=0;i<pts.length;i++) { const x=i*xs, y=h-20-(pts[i].transparency/100)*50; i===0?recordingCtx.moveTo(x,y):recordingCtx.lineTo(x,y); }
-                recordingCtx.stroke();
-            }
-            recordingCtx.fillStyle='#3fb950'; recordingCtx.font='bold 14px sans-serif';
-            recordingCtx.fillText(`${currentTransparency.toFixed(1)}%`,10,recordingCanvas.height-55);
-            requestAnimationFrame(renderFrame);
-        }
+        function renderFrame() { if(!isRecording) return; recordingCtx.drawImage(video,0,0,recordingCanvas.width,recordingCanvas.height); recordingCtx.fillStyle='rgba(0,0,0,0.5)'; recordingCtx.fillRect(0,recordingCanvas.height-80,recordingCanvas.width,80); if(trendData.length>=2) { const pts=trendData.slice(-30),w=recordingCanvas.width,h=recordingCanvas.height,xs=w/(pts.length-1); recordingCtx.beginPath(); recordingCtx.strokeStyle='#3fb950'; recordingCtx.lineWidth=2; for(let i=0;i<pts.length;i++) { const x=i*xs, y=h-20-(pts[i].transparency/100)*50; i===0?recordingCtx.moveTo(x,y):recordingCtx.lineTo(x,y); } recordingCtx.stroke(); } recordingCtx.fillStyle='#3fb950'; recordingCtx.font='bold 14px sans-serif'; recordingCtx.fillText(`${currentTransparency.toFixed(1)}%`,10,recordingCanvas.height-55); requestAnimationFrame(renderFrame); }
 
         autoCalBtn.addEventListener('click', startAutoCalibration);
         soundToggleBtn.addEventListener('click', ()=>{ initAudio(); soundEnabled=!soundEnabled; soundToggleBtn.textContent=soundEnabled?'🔊 Звук':'🔇 Без звука'; soundDot.classList.toggle('muted',!soundEnabled); soundStatusEl.textContent=soundEnabled?'Звук включён':'Звук выключен'; });
         themeToggleBtn.addEventListener('click', toggleTheme);
-        cameraSelect.addEventListener('change', () => switchCamera(cameraSelect.value));
-        refreshCamerasBtn.addEventListener('click', getCameraList);
+        connectIpBtn.addEventListener('click', connectToIpCamera);
+        disconnectIpBtn.addEventListener('click', disconnectIpCamera);
 
         function analyzeFrame() {
-            if(!stream || video.readyState < 2) { animationId = requestAnimationFrame(analyzeFrame); return; }
+            if((!stream && !ipStream) || video.readyState < 2) { animationId = requestAnimationFrame(analyzeFrame); return; }
             const c=document.createElement('canvas'); c.width=video.videoWidth; c.height=video.videoHeight;
             const ctx=c.getContext('2d'); ctx.drawImage(video,0,0);
             let img;
-            if(analysisRegion) {
-                const rx=Math.max(0,Math.min(analysisRegion.x,c.width-1)), ry=Math.max(0,Math.min(analysisRegion.y,c.height-1));
-                const rw=Math.max(1,Math.min(analysisRegion.width,c.width-rx)), rh=Math.max(1,Math.min(analysisRegion.height,c.height-ry));
-                img=ctx.getImageData(rx,ry,rw,rh);
-            } else img=ctx.getImageData(0,0,c.width,c.height);
+            if(analysisRegion) { const rx=Math.max(0,Math.min(analysisRegion.x,c.width-1)), ry=Math.max(0,Math.min(analysisRegion.y,c.height-1)); const rw=Math.max(1,Math.min(analysisRegion.width,c.width-rx)), rh=Math.max(1,Math.min(analysisRegion.height,c.height-ry)); img=ctx.getImageData(rx,ry,rw,rh); }
+            else img=ctx.getImageData(0,0,c.width,c.height);
             const data=img.data; let total=0;
             for(let i=0;i<data.length;i+=4) total+=0.299*data[i]+0.587*data[i+1]+0.114*data[i+2];
             currentBrightness=total/(data.length/4);
-            if(calibrationLow!==null&&calibrationHigh!==null&&calibrationLow>calibrationHigh)
-                currentTransparency=((currentBrightness-calibrationHigh)/(calibrationLow-calibrationHigh))*100;
+            if(calibrationLow!==null&&calibrationHigh!==null&&calibrationLow>calibrationHigh) currentTransparency=((currentBrightness-calibrationHigh)/(calibrationLow-calibrationHigh))*100;
             else if(calibrationLow!==null) currentTransparency=(currentBrightness/calibrationLow)*100;
             else currentTransparency=(currentBrightness/255)*100;
             currentTransparency=Math.max(0,Math.min(100,currentTransparency));
-            transparencyEl.textContent=currentTransparency.toFixed(1)+'%';
-            brightnessEl.textContent=currentBrightness.toFixed(1);
-            indicatorEl.style.left=currentTransparency+'%';
-            meterFill.style.width=currentTransparency+'%';
+            transparencyEl.textContent=currentTransparency.toFixed(1)+'%'; brightnessEl.textContent=currentBrightness.toFixed(1);
+            indicatorEl.style.left=currentTransparency+'%'; meterFill.style.width=currentTransparency+'%';
             const th=parseFloat(thresholdInput.value)||30;
             if(currentTransparency<th) { warningMsg.textContent='⚠️ WARNING!'; warningMsg.classList.add('active'); playCalmBeep(); }
             else { warningMsg.textContent=''; warningMsg.classList.remove('active'); }
@@ -684,20 +650,8 @@
         document.addEventListener('click', initAudio, { once: true });
         document.addEventListener('touchstart', initAudio, { once: true });
 
-        window.addEventListener('load', async ()=>{
-            if(!navigator.mediaDevices?.getUserMedia) { statusEl.textContent='❌ Нет камеры'; return; }
-            await getCameraList();
-            // Запускаем камеру по умолчанию (последнюю в списке)
-            if (cameraSelect.options.length > 0 && cameraSelect.value) {
-                switchCamera(cameraSelect.value);
-            }
-        });
-        window.addEventListener('beforeunload', ()=>{
-            if(stream) stream.getTracks().forEach(t=>t.stop());
-            if(autoRecordTimer) clearInterval(autoRecordTimer);
-            if(autoCalibration.active) stopAutoCalibration();
-            if(isRecording) stopVid();
-        });
+        window.addEventListener('load', ()=>{ if(!navigator.mediaDevices?.getUserMedia) { statusEl.textContent='❌ Нет камеры'; return; } startCamera(); });
+        window.addEventListener('beforeunload', ()=>{ if(stream) stream.getTracks().forEach(t=>t.stop()); if(ipStream) ipStream.getTracks().forEach(t=>t.stop()); if(autoRecordTimer) clearInterval(autoRecordTimer); if(autoCalibration.active) stopAutoCalibration(); if(isRecording) stopVid(); });
     </script>
 </body>
 </html>
