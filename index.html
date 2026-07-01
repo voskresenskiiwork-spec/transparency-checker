@@ -40,13 +40,25 @@
             margin: 8px 0; flex-wrap: wrap;
         }
         .ip-camera-row input {
-            flex: 1 1 auto; min-width: 160px; padding: 8px 10px; border-radius: 8px;
+            flex: 1 1 auto; min-width: 200px; padding: 10px 12px; border-radius: 8px;
             border: 1px solid var(--border); background: var(--surface); color: var(--text);
             font-size: 0.8rem;
         }
-        .ip-camera-row input::placeholder { color: var(--text-secondary); font-size: 0.7rem; }
-        .ip-camera-row button { flex: 0 0 auto; min-width: 70px; padding: 8px 10px; font-size: 0.7rem; }
+        .ip-camera-row select {
+            flex: 0 0 auto; min-width: 130px; padding: 10px 6px; border-radius: 8px;
+            border: 1px solid var(--border); background: var(--surface); color: var(--text);
+            font-size: 0.75rem;
+        }
+        .ip-camera-row button { flex: 0 0 auto; min-width: 70px; padding: 10px 8px; font-size: 0.7rem; }
         .camera-status { font-size: 0.7rem; color: var(--text-secondary); margin: 4px 0; }
+        
+        .ip-help {
+            background: var(--surface); border: 1px solid var(--yellow); border-radius: 12px;
+            padding: 10px; margin: 8px 0; font-size: 0.68rem; color: var(--text-secondary);
+            text-align: left;
+        }
+        .ip-help summary { cursor: pointer; font-weight: 600; color: var(--yellow); margin-bottom: 4px; }
+        .ip-help code { background: var(--bg); padding: 1px 4px; border-radius: 4px; font-size: 0.68rem; color: var(--green); }
         
         .video-wrapper {
             position: relative; width: 100%; aspect-ratio: 4/3; background: #000;
@@ -186,13 +198,26 @@
         
         <!-- Блок IP-камеры -->
         <div class="ip-camera-row">
-            <input type="text" id="ipCameraInput" placeholder="http://192.168.1.100:8080/video">
+            <input type="text" id="ipCameraInput" placeholder="http://192.168.0.10/mjpeg">
+            <select id="ipPreset">
+                <option value="">Пресеты</option>
+                <option value="/mjpeg">Panasonic MJPEG</option>
+                <option value="/cgi-bin/mjpeg">Panasonic CGI</option>
+                <option value="/nphMotionJpeg?Resolution=640x480">Panasonic HD</option>
+            </select>
             <button id="connectIpBtn" class="btn-cyan">📡 Подключить IP</button>
             <button id="disconnectIpBtn" class="btn-red" disabled>✕ Откл.</button>
         </div>
         <div class="camera-status">
             Источник: <span id="cameraSource" style="color:var(--green);font-weight:600;">встроенная камера</span>
         </div>
+        
+        <!-- Подсказка -->
+        <details class="ip-help">
+            <summary>💡 Как подключить IP-камеру</summary>
+            <p>📥 <button id="downloadLocalBtn" class="btn-yellow" style="padding:2px 6px;font-size:0.65rem;min-width:auto;">Скачать</button> файл и откройте его <strong>локально на компьютере</strong> (не через GitHub Pages).</p>
+            <p>🔒 Браузеры блокируют HTTP-запросы с HTTPS-сайтов к локальным IP.</p>
+        </details>
         
         <div class="video-wrapper" id="videoWrapper">
             <video id="video" autoplay playsinline muted class="active"></video>
@@ -268,8 +293,10 @@
         const overlayCanvas = document.getElementById('overlayCanvas');
         const overlayCtx = overlayCanvas.getContext('2d');
         const ipCameraInput = document.getElementById('ipCameraInput');
+        const ipPreset = document.getElementById('ipPreset');
         const connectIpBtn = document.getElementById('connectIpBtn');
         const disconnectIpBtn = document.getElementById('disconnectIpBtn');
+        const downloadLocalBtn = document.getElementById('downloadLocalBtn');
         const cameraSource = document.getElementById('cameraSource');
         const areaBtn = document.getElementById('areaBtn'), resetBtn = document.getElementById('resetBtn');
         const calibrateLowBtn = document.getElementById('calibrateLowBtn'), calibrateHighBtn = document.getElementById('calibrateHighBtn');
@@ -290,7 +317,6 @@
         const timerRow = document.getElementById('timerRow'), timerInterval = document.getElementById('timerInterval');
         const timerCountdown = document.getElementById('timerCountdown'), stopAutoBtn = document.getElementById('stopAutoBtn');
 
-        // ===== Состояние =====
         let stream = null, analysisRegion = null, isSelecting = false, animationId = null;
         let calibrationLow = null, calibrationHigh = null;
         let currentTransparency = 0, currentBrightness = 0, trendData = [];
@@ -299,12 +325,36 @@
         let isDarkTheme = true, mediaRecorder = null, recordedChunks = [], isRecording = false;
         let recordingCanvas = null, recordingCtx = null, recordingStream = null;
         let usingIpCamera = false;
+        let cameraPermissionGranted = false;
 
-        // ===== IP-камера (прямое подключение через img/video) =====
+        // ===== Скачать локальный файл =====
+        downloadLocalBtn.addEventListener('click', () => {
+            const html = document.documentElement.outerHTML;
+            const blob = new Blob(['<!DOCTYPE html>\n' + html], { type: 'text/html' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'transparency_checker.html';
+            a.click();
+            statusEl.textContent = '📥 Файл сохранён. Откройте его локально!';
+        });
+
+        // ===== Пресеты IP-камеры =====
+        ipPreset.addEventListener('change', () => {
+            if (ipPreset.value) {
+                const currentUrl = ipCameraInput.value.trim();
+                const ipMatch = currentUrl.match(/https?:\/\/([^\/]+)/);
+                const baseIp = ipMatch ? ipMatch[1] : '192.168.0.10';
+                ipCameraInput.value = `http://${baseIp}${ipPreset.value}`;
+            }
+        });
+
+        // ===== IP-камера (ЗАХВАТ ЧЕРЕЗ IMG ДЛЯ MJPEG) =====
         function connectToIpCamera() {
             let address = ipCameraInput.value.trim();
             if (!address) { statusEl.textContent = '❌ Введите адрес камеры'; return; }
-            if (!address.startsWith('http://') && !address.startsWith('https://')) address = 'http://' + address;
+            if (!address.startsWith('http://') && !address.startsWith('https://')) {
+                address = 'http://' + address;
+            }
 
             statusEl.textContent = '📡 Подключение к IP-камере...';
             connectIpBtn.disabled = true;
@@ -312,42 +362,54 @@
             // Останавливаем встроенную камеру
             if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
             if (animationId) { cancelAnimationFrame(animationId); animationId = null; }
+            
+            // Показываем img, скрываем video
             video.classList.remove('active');
             video.srcObject = null;
-
-            // Пробуем через img (MJPEG)
+            video.src = '';
             ipCameraImg.classList.add('active');
             ipCameraImg.src = address;
+            
+            let resolved = false;
+            
             ipCameraImg.onload = () => {
+                if (resolved) return; resolved = true;
                 usingIpCamera = true;
-                cameraSource.textContent = 'IP-камера: ' + address;
+                cameraSource.textContent = 'IP-камера (MJPEG): ' + address;
                 cameraSource.style.color = 'var(--green)';
                 disconnectIpBtn.disabled = false;
                 connectIpBtn.disabled = false;
-                statusEl.textContent = '✅ IP-камера подключена (MJPEG)';
+                statusEl.textContent = '✅ IP-камера подключена через MJPEG';
                 enableButtons();
                 startAnalysis();
             };
+            
             ipCameraImg.onerror = () => {
-                // Пробуем через video
+                if (resolved) return; resolved = true;
+                // Пробуем video
                 ipCameraImg.classList.remove('active');
                 ipCameraImg.src = '';
                 video.classList.add('active');
                 video.crossOrigin = 'anonymous';
                 video.src = address;
+                
                 video.onloadedmetadata = () => {
-                    video.play();
-                    usingIpCamera = true;
-                    cameraSource.textContent = 'IP-камера: ' + address;
-                    cameraSource.style.color = 'var(--green)';
-                    disconnectIpBtn.disabled = false;
-                    connectIpBtn.disabled = false;
-                    statusEl.textContent = '✅ IP-камера подключена (Video)';
-                    enableButtons();
-                    startAnalysis();
+                    if (resolved) return; resolved = true;
+                    video.play().then(() => {
+                        usingIpCamera = true;
+                        cameraSource.textContent = 'IP-камера (Video): ' + address;
+                        cameraSource.style.color = 'var(--green)';
+                        disconnectIpBtn.disabled = false;
+                        connectIpBtn.disabled = false;
+                        statusEl.textContent = '✅ IP-камера подключена через Video';
+                        enableButtons();
+                        startAnalysis();
+                    });
                 };
+                
                 video.onerror = () => {
-                    statusEl.textContent = '❌ Не удалось подключиться. Проверьте адрес.';
+                    if (resolved) return; resolved = true;
+                    statusEl.textContent = '❌ Камера недоступна. Откройте файл локально!';
                     connectIpBtn.disabled = false;
                     disconnectIpCamera();
                 };
@@ -361,21 +423,41 @@
             video.classList.remove('active');
             usingIpCamera = false;
             cameraSource.textContent = 'встроенная камера';
+            cameraSource.style.color = 'var(--green)';
             disconnectIpBtn.disabled = true;
             if (animationId) { cancelAnimationFrame(animationId); animationId = null; }
-            startCamera();
+            if (stream) { 
+                video.srcObject = stream; 
+                video.classList.add('active');
+                enableButtons(); 
+                startAnalysis(); 
+                statusEl.textContent = '✅ Встроенная камера'; 
+            }
+            else { startCamera(); }
         }
 
         // ===== Встроенная камера =====
         async function startCamera() {
+            if (cameraPermissionGranted && stream) {
+                video.srcObject = stream;
+                video.classList.add('active');
+                ipCameraImg.classList.remove('active');
+                ipCameraImg.src = '';
+                usingIpCamera = false;
+                cameraSource.textContent = 'встроенная камера';
+                enableButtons();
+                startAnalysis();
+                return;
+            }
             try {
                 stream = await navigator.mediaDevices.getUserMedia({
                     video: { facingMode: { ideal: 'environment' }, width: { ideal: 640 }, height: { ideal: 480 } },
                     audio: false
                 });
+                cameraPermissionGranted = true;
             } catch (e) {
-                try { stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false }); }
-                catch (err) { statusEl.textContent = '❌ Нет доступа к камере'; return; }
+                try { stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false }); cameraPermissionGranted = true; }
+                catch (err) { statusEl.textContent = '❌ Нет доступа к камере. Разрешите и перезагрузите.'; return; }
             }
             video.srcObject = stream;
             video.classList.add('active');
@@ -384,12 +466,8 @@
             usingIpCamera = false;
             cameraSource.textContent = 'встроенная камера';
             cameraSource.style.color = 'var(--green)';
-            video.onloadedmetadata = () => {
-                video.play();
-                statusEl.textContent = '✅ Камера работает';
-                enableButtons();
-                startAnalysis();
-            };
+            disconnectIpBtn.disabled = true;
+            video.onloadedmetadata = () => { video.play(); statusEl.textContent = '✅ Камера работает'; enableButtons(); startAnalysis(); };
         }
 
         // ===== Авто-калибровка =====
@@ -397,11 +475,11 @@
         function startAutoCalibration() {
             if (autoCalibration.active) { stopAutoCalibration(); return; }
             if (!stream && !usingIpCamera) return;
-            autoCalibration.active = true; autoCalibration.startTime = Date.now(); autoCalibration.elapsedSeconds = 0;
-            autoCalBtn.textContent = '⏹️ Стоп калибр'; autoCalProgress.style.display = 'block';
-            autoCalPhase.textContent = '⚡ Авто-калибровка активна'; progressFill.style.width = '0%';
-            if (calibrationLow === null) { calibrationLow = currentBrightness; updateCalInputs(); logAuto('📏 Начальный нижний: ' + calibrationLow.toFixed(1)); }
-            if (calibrationHigh === null) { calibrationHigh = currentBrightness; updateCalInputs(); logAuto('⬛ Начальный верхний: ' + calibrationHigh.toFixed(1)); }
+            autoCalibration.active = true; autoCalibration.startTime = Date.now();
+            autoCalBtn.textContent = '⏹️ Стоп'; autoCalProgress.style.display = 'block';
+            autoCalPhase.textContent = '⚡ Активна'; progressFill.style.width = '0%';
+            if (calibrationLow === null) { calibrationLow = currentBrightness; updateCalInputs(); logAuto('📏 Старт нижний: ' + calibrationLow.toFixed(1)); }
+            if (calibrationHigh === null) { calibrationHigh = currentBrightness; updateCalInputs(); logAuto('⬛ Старт верхний: ' + calibrationHigh.toFixed(1)); }
             autoCalibration.intervalId = setInterval(() => {
                 const elapsed = Date.now() - autoCalibration.startTime;
                 autoCalibration.elapsedSeconds = Math.floor(elapsed / 1000);
@@ -412,14 +490,14 @@
                     if (currentBrightness > calibrationLow) { calibrationLow = currentBrightness; updateCalInputs(); logAuto('📏 Нижний: ' + calibrationLow.toFixed(1)); }
                     if (calibrationLow !== null && currentBrightness < calibrationHigh && currentBrightness < calibrationLow) { calibrationHigh = currentBrightness; updateCalInputs(); logAuto('⬛ Верхний: ' + calibrationHigh.toFixed(1)); }
                 }
-                if (elapsed >= autoCalibration.totalDuration) { stopAutoCalibration(); statusEl.textContent = '🔬 Авто-калибровка завершена'; }
+                if (elapsed >= autoCalibration.totalDuration) { stopAutoCalibration(); statusEl.textContent = '🔬 Завершена'; }
             }, 1000);
-            statusEl.textContent = '🔬 Авто-калибровка запущена (20 мин)';
+            statusEl.textContent = '🔬 Авто-калибровка (20 мин)';
         }
         function stopAutoCalibration() { autoCalibration.active = false; if (autoCalibration.intervalId) clearInterval(autoCalibration.intervalId); autoCalBtn.textContent = '🔬 Авто.калибр'; autoCalProgress.style.display = 'none'; logAuto('⏹️ Остановлена'); }
         function logAuto(msg) { const div = document.createElement('div'); div.className = 'history-item'; div.innerHTML = `<span style="font-size:0.7rem;color:var(--text-secondary)">${new Date().toLocaleTimeString('ru-RU')}</span> <span style="color:var(--orange)">🔬 ${msg}</span>`; historyList.prepend(div); }
 
-        // ===== Тема, звук, дата =====
+        // Тема, звук, дата
         function toggleTheme() { isDarkTheme = !isDarkTheme; document.body.classList.toggle('light-theme', !isDarkTheme); themeToggleBtn.textContent = isDarkTheme ? '☀️ Светлая' : '🌙 Тёмная'; drawTrend(); }
         function initAudio() { if (!audioCtx) { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); if (audioCtx.state === 'suspended') audioCtx.resume(); } }
         function playCalmBeep() { if (!soundEnabled || !audioCtx) return; const now = Date.now(); if (now - lastBeepTime < beepInterval) return; lastBeepTime = now; const t = audioCtx.currentTime; const tone = (f, st, d, v) => { const o = audioCtx.createOscillator(), g = audioCtx.createGain(); o.connect(g); g.connect(audioCtx.destination); o.type = 'sine'; o.frequency.setValueAtTime(f, st); g.gain.setValueAtTime(0, st); g.gain.linearRampToValueAtTime(v, st+0.05); g.gain.linearRampToValueAtTime(0, st+d); o.start(st); o.stop(st+d); }; tone(440, t, 0.3, 0.08); tone(554, t+0.2, 0.25, 0.06); beepInterval = Math.max(800, 3000 - currentTransparency * 30); }
@@ -429,7 +507,7 @@
         function updateStatistics() { if (!historyRecords.length) { statAvg.textContent='—'; statMin.textContent='—'; statMax.textContent='—'; statCount.textContent='0'; return; } const v = historyRecords.map(r=>r.transparency); statAvg.textContent = (v.reduce((a,b)=>a+b,0)/v.length).toFixed(1)+'%'; statMin.textContent = Math.min(...v).toFixed(1)+'%'; statMax.textContent = Math.max(...v).toFixed(1)+'%'; statCount.textContent = v.length; }
         function drawVideoOverlay() {
             const source = usingIpCamera ? ipCameraImg : video;
-            const w = (usingIpCamera ? ipCameraImg.naturalWidth : video.videoWidth) || 640;
+            const w = (source.naturalWidth || source.videoWidth) || 640;
             overlayCanvas.width = w; overlayCanvas.height = 80;
             overlayCtx.clearRect(0, 0, w, 80);
             overlayCtx.fillStyle = 'rgba(0,0,0,0.5)'; overlayCtx.fillRect(0, 0, w, 80);
@@ -458,8 +536,8 @@
         function addTrendPoint(t) { trendData.push({ time: Date.now(), transparency: t }); if (trendData.length > 60) trendData.shift(); drawTrend(); }
         function enableButtons() { areaBtn.disabled = false; calibrateLowBtn.disabled = false; calibrateHighBtn.disabled = false; recordBtn.disabled = false; soundToggleBtn.disabled = false; snapshotBtn.disabled = false; videoRecordBtn.disabled = false; exportBtn.disabled = false; autoRecordBtn.disabled = false; autoCalBtn.disabled = false; resetBtn.disabled = false; }
 
-        // ===== Выбор области =====
-        function getCoords(e) { const r = (usingIpCamera ? ipCameraImg : video).getBoundingClientRect(); return { x: (e.touches?e.touches[0].clientX:e.clientX)-r.left, y: (e.touches?e.touches[0].clientY:e.clientY)-r.top, rw: r.width, rh: r.height }; }
+        // Выбор области
+        function getCoords(e) { const source = usingIpCamera ? ipCameraImg : video; const r = source.getBoundingClientRect(); return { x: (e.touches?e.touches[0].clientX:e.clientX)-r.left, y: (e.touches?e.touches[0].clientY:e.clientY)-r.top, rw: r.width, rh: r.height }; }
         let sx, sy;
         function pd(e) { if(!isSelecting) return; e.preventDefault(); const p=getCoords(e); sx=p.x; sy=p.y; regionSelector.style.display='block'; regionSelector.style.left=p.x+'px'; regionSelector.style.top=p.y+'px'; regionSelector.style.width='0px'; regionSelector.style.height='0px'; }
         function pm(e) { if(!isSelecting||sx===undefined) return; e.preventDefault(); const p=getCoords(e); regionSelector.style.left=Math.min(sx,p.x)+'px'; regionSelector.style.top=Math.min(sy,p.y)+'px'; regionSelector.style.width=Math.abs(p.x-sx)+'px'; regionSelector.style.height=Math.abs(p.y-sy)+'px'; }
@@ -487,7 +565,7 @@
         exportBtn.addEventListener('click', ()=>{ if(!historyRecords.length) { statusEl.textContent='❌ Нет данных'; return; } let csv='Дата;Время;Прозрачность(%);Яркость;Нижний предел;Верхний предел;Статус\n'; historyRecords.forEach(r=>{ csv+=`${r.date};${r.time};${r.transparency.toFixed(1)};${r.brightness.toFixed(1)};${r.lowLimit!==null?r.lowLimit.toFixed(1):'—'};${r.highLimit!==null?r.highLimit.toFixed(1):'—'};${r.warning?'WARNING':'Норма'}\n`; }); const b=new Blob(['\uFEFF'+csv],{type:'text/csv'}), a=document.createElement('a'); a.download='data_'+new Date().toISOString().slice(0,10)+'.csv'; a.href=URL.createObjectURL(b); a.click(); statusEl.textContent='📊 Экспорт ('+historyRecords.length+' записей)'; });
         autoRecordBtn.addEventListener('click', ()=>{ if(autoRecordTimer) { clearInterval(autoRecordTimer); autoRecordTimer=null; timerRow.style.display='none'; autoRecordBtn.textContent='⏱️ Авто'; return; } const iv=parseInt(timerInterval.value)||5; timerRow.style.display='flex'; autoRecordBtn.textContent='⏸️ Стоп'; autoRecordSeconds=iv; const ci=setInterval(()=>{ autoRecordSeconds--; timerCountdown.textContent=autoRecordSeconds>0?autoRecordSeconds+' сек':'Запись!'; if(autoRecordSeconds<=0) autoRecordSeconds=iv; },1000); autoRecordTimer=setInterval(()=>{ if(!stream && !usingIpCamera) return; addHistoryRecord(); }, iv*1000); stopAutoBtn.onclick=()=>{ clearInterval(autoRecordTimer); clearInterval(ci); autoRecordTimer=null; timerRow.style.display='none'; autoRecordBtn.textContent='⏱️ Авто'; }; });
         videoRecordBtn.addEventListener('click', () => isRecording ? stopVid() : startVid());
-        function startVid() { if(!stream && !usingIpCamera) return; const source = usingIpCamera ? ipCameraImg : video; recordedChunks=[]; recordingCanvas=document.createElement('canvas'); recordingCanvas.width=source.naturalWidth||source.videoWidth||640; recordingCanvas.height=source.naturalHeight||source.videoHeight||480; recordingCtx=recordingCanvas.getContext('2d'); recordingStream=recordingCanvas.captureStream(30); try { mediaRecorder=new MediaRecorder(recordingStream,{mimeType:'video/webm;codecs=vp9'}); } catch(e) { mediaRecorder=new MediaRecorder(recordingStream,{mimeType:'video/webm'}); } mediaRecorder.ondataavailable=e=>{ if(e.data.size>0) recordedChunks.push(e.data); }; mediaRecorder.onstop=()=>{ const blob=new Blob(recordedChunks,{type:'video/webm'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='video_'+new Date().toISOString().slice(0,19).replace(/:/g,'-')+'.webm'; a.click(); statusEl.textContent='🎥 Видео сохранено'; }; mediaRecorder.start(); isRecording=true; videoRecordBtn.textContent='⏹️ Стоп'; recordIndicator.style.display='block'; renderFrame(); }
+        function startVid() { if(!stream && !usingIpCamera) return; const source = usingIpCamera ? ipCameraImg : video; recordedChunks=[]; recordingCanvas=document.createElement('canvas'); recordingCanvas.width=(source.naturalWidth||source.videoWidth)||640; recordingCanvas.height=(source.naturalHeight||source.videoHeight)||480; recordingCtx=recordingCanvas.getContext('2d'); recordingStream=recordingCanvas.captureStream(30); try { mediaRecorder=new MediaRecorder(recordingStream,{mimeType:'video/webm;codecs=vp9'}); } catch(e) { mediaRecorder=new MediaRecorder(recordingStream,{mimeType:'video/webm'}); } mediaRecorder.ondataavailable=e=>{ if(e.data.size>0) recordedChunks.push(e.data); }; mediaRecorder.onstop=()=>{ const blob=new Blob(recordedChunks,{type:'video/webm'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='video_'+new Date().toISOString().slice(0,19).replace(/:/g,'-')+'.webm'; a.click(); statusEl.textContent='🎥 Видео сохранено'; }; mediaRecorder.start(); isRecording=true; videoRecordBtn.textContent='⏹️ Стоп'; recordIndicator.style.display='block'; renderFrame(); }
         function stopVid() { if(mediaRecorder&&mediaRecorder.state!=='inactive') mediaRecorder.stop(); isRecording=false; videoRecordBtn.textContent='🎥 Видео'; recordIndicator.style.display='none'; }
         function renderFrame() { if(!isRecording) return; const source = usingIpCamera ? ipCameraImg : video; recordingCtx.drawImage(source,0,0,recordingCanvas.width,recordingCanvas.height); recordingCtx.fillStyle='rgba(0,0,0,0.5)'; recordingCtx.fillRect(0,recordingCanvas.height-80,recordingCanvas.width,80); if(trendData.length>=2) { const pts=trendData.slice(-30),w=recordingCanvas.width,h=recordingCanvas.height,xs=w/(pts.length-1); recordingCtx.beginPath(); recordingCtx.strokeStyle='#3fb950'; recordingCtx.lineWidth=2; for(let i=0;i<pts.length;i++) { const x=i*xs, y=h-20-(pts[i].transparency/100)*50; i===0?recordingCtx.moveTo(x,y):recordingCtx.lineTo(x,y); } recordingCtx.stroke(); } recordingCtx.fillStyle='#3fb950'; recordingCtx.font='bold 14px sans-serif'; recordingCtx.fillText(`${currentTransparency.toFixed(1)}%`,10,recordingCanvas.height-55); requestAnimationFrame(renderFrame); }
 
@@ -499,25 +577,40 @@
 
         function analyzeFrame() {
             const source = usingIpCamera ? ipCameraImg : video;
-            if ((!stream && !usingIpCamera) || (usingIpCamera && !source.complete) || (!usingIpCamera && video.readyState < 2)) { animationId = requestAnimationFrame(analyzeFrame); return; }
-            const c=document.createElement('canvas');
-            c.width = source.naturalWidth || source.videoWidth || 640;
+            if ((!stream && !usingIpCamera) || (usingIpCamera && !source.complete) || (!usingIpCamera && video.readyState < 2)) { 
+                animationId = requestAnimationFrame(analyzeFrame); 
+                return; 
+            }
+            const c=document.createElement('canvas'); 
+            c.width = source.naturalWidth || source.videoWidth || 640; 
             c.height = source.naturalHeight || source.videoHeight || 480;
-            const ctx=c.getContext('2d'); ctx.drawImage(source,0,0);
+            const ctx=c.getContext('2d'); 
+            ctx.drawImage(source,0,0);
             let img;
-            if(analysisRegion) { const rx=Math.max(0,Math.min(analysisRegion.x,c.width-1)), ry=Math.max(0,Math.min(analysisRegion.y,c.height-1)); const rw=Math.max(1,Math.min(analysisRegion.width,c.width-rx)), rh=Math.max(1,Math.min(analysisRegion.height,c.height-ry)); img=ctx.getImageData(rx,ry,rw,rh); }
+            if(analysisRegion) { 
+                const rx=Math.max(0,Math.min(analysisRegion.x,c.width-1)), ry=Math.max(0,Math.min(analysisRegion.y,c.height-1)); 
+                const rw=Math.max(1,Math.min(analysisRegion.width,c.width-rx)), rh=Math.max(1,Math.min(analysisRegion.height,c.height-ry)); 
+                img=ctx.getImageData(rx,ry,rw,rh); 
+            }
             else img=ctx.getImageData(0,0,c.width,c.height);
             const data=img.data; let total=0;
             for(let i=0;i<data.length;i+=4) total+=0.299*data[i]+0.587*data[i+1]+0.114*data[i+2];
             currentBrightness=total/(data.length/4);
-            if(calibrationLow!==null&&calibrationHigh!==null&&calibrationLow>calibrationHigh) currentTransparency=((currentBrightness-calibrationHigh)/(calibrationLow-calibrationHigh))*100;
+            if(calibrationLow!==null&&calibrationHigh!==null&&calibrationLow>calibrationHigh) 
+                currentTransparency=((currentBrightness-calibrationHigh)/(calibrationLow-calibrationHigh))*100;
             else if(calibrationLow!==null) currentTransparency=(currentBrightness/calibrationLow)*100;
             else currentTransparency=(currentBrightness/255)*100;
             currentTransparency=Math.max(0,Math.min(100,currentTransparency));
-            transparencyEl.textContent=currentTransparency.toFixed(1)+'%'; brightnessEl.textContent=currentBrightness.toFixed(1);
-            indicatorEl.style.left=currentTransparency+'%'; meterFill.style.width=currentTransparency+'%';
+            transparencyEl.textContent=currentTransparency.toFixed(1)+'%'; 
+            brightnessEl.textContent=currentBrightness.toFixed(1);
+            indicatorEl.style.left=currentTransparency+'%'; 
+            meterFill.style.width=currentTransparency+'%';
             const th=parseFloat(thresholdInput.value)||30;
-            if(currentTransparency<th) { warningMsg.textContent='⚠️ WARNING!'; warningMsg.classList.add('active'); playCalmBeep(); }
+            if(currentTransparency<th) { 
+                warningMsg.textContent='⚠️ WARNING!'; 
+                warningMsg.classList.add('active'); 
+                playCalmBeep(); 
+            }
             else { warningMsg.textContent=''; warningMsg.classList.remove('active'); }
             addTrendPoint(currentTransparency);
             animationId=requestAnimationFrame(analyzeFrame);
@@ -527,8 +620,16 @@
         document.addEventListener('click', initAudio, { once: true });
         document.addEventListener('touchstart', initAudio, { once: true });
 
-        window.addEventListener('load', ()=>{ if(!navigator.mediaDevices?.getUserMedia) { statusEl.textContent='❌ Нет камеры'; return; } startCamera(); });
-        window.addEventListener('beforeunload', ()=>{ if(stream) stream.getTracks().forEach(t=>t.stop()); if(autoRecordTimer) clearInterval(autoRecordTimer); if(autoCalibration.active) stopAutoCalibration(); if(isRecording) stopVid(); });
+        window.addEventListener('load', () => {
+            if (!navigator.mediaDevices?.getUserMedia) { statusEl.textContent='❌ Браузер не поддерживает камеру'; return; }
+            startCamera();
+        });
+        window.addEventListener('beforeunload', () => {
+            if(stream) stream.getTracks().forEach(t=>t.stop());
+            if(autoRecordTimer) clearInterval(autoRecordTimer);
+            if(autoCalibration.active) stopAutoCalibration();
+            if(isRecording) stopVid();
+        });
     </script>
 </body>
 </html>
